@@ -65,5 +65,6 @@
   "description": "Join firestore references automatically.",
   "directories": {
     "test": "test"
-  }
+  },
+  "keywords": ["firestore", "firebase", "references", "relations", "join", "include"]
 }
