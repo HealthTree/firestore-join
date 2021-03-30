@@ -3,7 +3,7 @@
     "type": "git",
     "url": "https://github.com/HealthTree/firestore-join"
   },
-  "version": "0.2.0",
+  "version": "0.4.0",
   "license": "MIT",
   "main": "dist/index.js",
   "typings": "dist/index.d.ts",
@@ -37,14 +37,14 @@
   },
   "name": "@healthtree/firestore-join",
   "author": "jpcapdevila",
-  "module": "dist/firestoreserializer.esm.js",
+  "module": "dist/firestore-join.esm.js",
   "size-limit": [
     {
-      "path": "dist/firestoreserializer.cjs.production.min.js",
+      "path": "dist/firestore-join.cjs.production.min.js",
       "limit": "10 KB"
     },
     {
-      "path": "dist/firestoreserializer.esm.js",
+      "path": "dist/firestore-join.esm.js",
       "limit": "10 KB"
     }
   ],

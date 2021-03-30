@@ -145,9 +145,9 @@ export class SerializedDocument {
 }
 
 function transformDates (serializedDocument: any){
-  Object.keys(serializedDocument).forEach(property => {
-    if (serializedDocument[property].toDate !== undefined) {
-      serializedDocument[property] = serializedDocument[property].toDate()
+  Object.keys(serializedDocument.data).forEach(property => {
+    if (serializedDocument.data[property].toDate !== undefined) {
+      serializedDocument.data[property] = serializedDocument.data[property].toDate()
     }
   })
   return serializedDocument;
