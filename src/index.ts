@@ -169,9 +169,17 @@ export class SerializedDocument {
 
 function transformDates(serializedDocument: any) {
     Object.keys(serializedDocument.data).forEach(property => {
-        if (serializedDocument.data[property]?.toDate !== undefined) {
-            serializedDocument.data[property] = serializedDocument.data[property].toDate()
+        if (typeof serializedDocument.data[property] === 'object') {
+            if (Array.isArray(serializedDocument.data[property])){
+                serializedDocument.data[property].forEach((obj: any, index: string | number) => {
+                    serializedDocument.data[property][index] = transformDates(obj);
+                });
+            }
+            else if (typeof serializedDocument.data[property]?.toDate === 'function')
+                serializedDocument.data[property] = serializedDocument.data[property].toDate();
+            else
+                serializedDocument.data[property] = transformDates(serializedDocument.data[property]);
         }
-    })
+    });
     return serializedDocument;
 }
