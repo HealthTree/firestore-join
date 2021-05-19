@@ -168,10 +168,21 @@ export class SerializedDocument {
 }
 
 function transformDates(serializedDocument: any) {
-    Object.keys(serializedDocument.data).forEach(property => {
-        if (serializedDocument.data[property]?.toDate !== undefined) {
-            serializedDocument.data[property] = serializedDocument.data[property].toDate()
+    return transformDatesHelper(serializedDocument.data);
+}
+function transformDatesHelper(data: any) {
+    Object.keys(data).forEach(property => {
+        if (typeof data[property] === 'object') {
+            if (Array.isArray(data[property])){
+                data[property].forEach((obj: any, index: string | number) => {
+                    data[property][index] = transformDatesHelper(obj);
+                });
+            }
+            else if (typeof data[property]?.toDate === 'function')
+                data[property] = data[property].toDate();
+            else
+                data[property] = transformDatesHelper(data[property]);
         }
-    })
-    return serializedDocument;
+    });
+    return data;
 }
