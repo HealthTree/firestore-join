@@ -168,7 +168,8 @@ export class SerializedDocument {
 }
 
 function transformDates(serializedDocument: any) {
-    return transformDatesHelper(serializedDocument.data);
+    serializedDocument.data = transformDatesHelper(serializedDocument.data);
+    return serializedDocument;
 }
 function transformDatesHelper(data: any) {
     Object.keys(data).forEach(property => {
