@@ -171,19 +171,24 @@ function transformDates(serializedDocument: any) {
     serializedDocument.data = transformDatesHelper(serializedDocument.data);
     return serializedDocument;
 }
-function transformDatesHelper(data: any) {
-    Object.keys(data).forEach(property => {
-        if (typeof data[property] === 'object') {
-            if (Array.isArray(data[property])){
-                data[property].forEach((obj: any, index: string | number) => {
-                    data[property][index] = transformDatesHelper(obj);
-                });
-            }
-            else if (typeof data[property]?.toDate === 'function')
-                data[property] = data[property].toDate();
-            else
-                data[property] = transformDatesHelper(data[property]);
+
+function transformDatesHelper(data: { [key: string]: any }) {
+    Object.entries(data).forEach(([property, value]) => {
+        if (Array.isArray(value)) { // Array
+            value.forEach((arrayValue: any, index) => {
+                if (isPlainObject(arrayValue)) {
+                    value[index] = transformDatesHelper(arrayValue);
+                }
+            });
+        } else if (typeof value?.toDate === 'function') { // Firestore timestamp
+            data[property] = value.toDate();
+        } else if (isPlainObject(value)) { // Is an object, not a reference nor a date!
+            data[property] = transformDatesHelper(value); // Regular object {}
         }
     });
     return data;
+}
+
+function isPlainObject(value: any) {
+    return Object.prototype.toString.call(value) == '[object Object]' && value.constructor.name === 'Object';
 }
