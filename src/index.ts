@@ -4,11 +4,21 @@ import _ from 'lodash'
 import DocumentReference = firebase.firestore.DocumentReference
 import DocumentSnapshot = firebase.firestore.DocumentSnapshot
 import QuerySnapshot = firebase.firestore.QuerySnapshot
+import Query = firebase.firestore.Query;
+
+const cacheTimeout = 3000;
+
+let documentReferencePromiseMapCache: { [key: string]: DocumentReferenceFromCache } = {};
 
 let serializedDocumentTransformer: Function = transformDates;
 
 export function setSerializedDocumentTransformer(transformerFunction: Function) {
     serializedDocumentTransformer = transformerFunction;
+}
+
+export interface DocumentReferenceFromCache {
+    promise: Promise<DocumentSnapshot>,
+    time: number
 }
 
 export interface IncludeConfig {
@@ -19,7 +29,7 @@ export interface SerializedDocumentNested {
     [key: string]: SerializedDocument;
 }
 
-export class SerializedDocumentArray extends Array {
+export class SerializedDocumentArray extends Array<SerializedDocument> {
     constructor(querySnapshot: QuerySnapshot, includesConfig: IncludeConfig) {
         let docs: SerializedDocument[] = []
         if (querySnapshot.docs) {
@@ -27,7 +37,17 @@ export class SerializedDocumentArray extends Array {
                 return new SerializedDocument(doc, includesConfig)
             })
         }
-        super(...docs as any[])
+        super(...docs)
+    }
+
+    static fromDocumentReferenceArray = async (documentReferenceArray: [DocumentReference], includesConfig: IncludeConfig): Promise<SerializedDocumentArray> => {
+        const serializedDocuments = await Promise.all(documentReferenceArray.map(documentReference => SerializedDocument.fromDocumentReference(documentReference, includesConfig)))
+        return Object.setPrototypeOf(serializedDocuments, SerializedDocumentArray.prototype);
+    }
+
+    static fromQuery = async (query: Query, includesConfig: IncludeConfig): Promise<SerializedDocumentArray> => {
+        const querySnapshot = await query.get();
+        return new SerializedDocumentArray(querySnapshot, includesConfig);
     }
 
     allPromises() {
@@ -45,7 +65,6 @@ export class SerializedDocumentArray extends Array {
     }
 }
 
-
 export class SerializedDocument {
     data: any
     ref: firebase.firestore.DocumentReference
@@ -59,11 +78,16 @@ export class SerializedDocument {
         this.data = serializedDocumentTransformer(this).data;
     }
 
-    static createLocal = (ref: DocumentReference, data: any = {}) => {
+    static createLocal = (ref: DocumentReference, data: any = {}): SerializedDocument => {
         const serializedDocument = Object.create(SerializedDocument);
         serializedDocument.ref = ref;
         serializedDocument.data = data;
         return serializedDocument;
+    }
+
+    static fromDocumentReference = async (ref: DocumentReference, includeConfig: IncludeConfig): Promise<SerializedDocument> => {
+        const documentSnapshot = await getDocumentReferenceFromCache(ref).promise;
+        return new SerializedDocument(documentSnapshot, includeConfig);
     }
 
     processIncludes = (includeConfig: IncludeConfig) => {
@@ -96,7 +120,7 @@ export class SerializedDocument {
         _.set(this.promises, path, [])
         documentReferenceArray.forEach((documentReference: DocumentReference) => {
             const promise = new Promise((resolve, reject) => {
-                documentReference.get().then(documentSnapshot => {
+                getDocumentReferenceFromCache(documentReference).promise.then(documentSnapshot => {
                     const includedSerializedDocument = serializedDocumentTransformer(new SerializedDocument(documentSnapshot, includeConfig))
                     _.get(this.included, path).push(includedSerializedDocument)
                     resolve(includedSerializedDocument)
@@ -108,7 +132,7 @@ export class SerializedDocument {
 
     includeReference = (path: string, documentReference: DocumentReference, includeConfig = {}) => {
         const promise = new Promise((resolve, reject) => {
-            documentReference.get().then(documentSnapshot => {
+            getDocumentReferenceFromCache(documentReference).promise.then(documentSnapshot => {
                 const includedSerializedDocument = serializedDocumentTransformer(new SerializedDocument(documentSnapshot, includeConfig))
                 _.set(this.included, path, includedSerializedDocument)
                 resolve(includedSerializedDocument)
@@ -167,13 +191,13 @@ export class SerializedDocument {
     })
 }
 
-function transformDates(serializedDocument: any) {
+function transformDates(serializedDocument: SerializedDocument) {
     serializedDocument.data = transformDatesHelper(serializedDocument.data);
     return serializedDocument;
 }
 
 function transformDatesHelper(data: { [key: string]: any }) {
-    Object.entries(data).forEach(([property, value]) => {
+    if (data) Object.entries(data).forEach(([property, value]) => {
         if (Array.isArray(value)) { // Array
             value.forEach((arrayValue: any, index) => {
                 if (isPlainObject(arrayValue)) {
@@ -191,4 +215,15 @@ function transformDatesHelper(data: { [key: string]: any }) {
 
 function isPlainObject(value: any) {
     return Object.prototype.toString.call(value) == '[object Object]' && value.constructor.name === 'Object';
+}
+
+function getDocumentReferenceFromCache(documentReference: DocumentReference): DocumentReferenceFromCache {
+    if (documentReferencePromiseMapCache[documentReference.path] && documentReferencePromiseMapCache[documentReference.path].time + cacheTimeout > Date.now()) {
+        return documentReferencePromiseMapCache[documentReference.path];
+    } else {
+        return documentReferencePromiseMapCache[documentReference.path] = {
+            promise: documentReference.get(),
+            time: Date.now()
+        }
+    }
 }
