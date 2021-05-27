@@ -6,15 +6,11 @@ import DocumentSnapshot = firebase.firestore.DocumentSnapshot
 import QuerySnapshot = firebase.firestore.QuerySnapshot
 import Query = firebase.firestore.Query;
 
-const cacheTimeout = 3000;
+let cacheTimeout: number = 3000;
 
 let documentReferencePromiseMapCache: { [key: string]: CachedDocumentSnapshotPromise } = {};
 
 let serializedDocumentTransformer: Function = transformDates;
-
-export function setSerializedDocumentTransformer(transformerFunction: Function) {
-    serializedDocumentTransformer = transformerFunction;
-}
 
 export interface CachedDocumentSnapshotPromise extends Promise<DocumentSnapshot>{
     time: number
@@ -247,6 +243,14 @@ function transformDatesHelper(data: { [key: string]: any }) {
 
 function isPlainObject(value: any) {
     return Object.prototype.toString.call(value) == '[object Object]' && value.constructor.name === 'Object';
+}
+
+export function setCacheTimeout(milliseconds: number) {
+    cacheTimeout = milliseconds;
+}
+
+export function setSerializedDocumentTransformer(transformerFunction: Function) {
+    serializedDocumentTransformer = transformerFunction;
 }
 
 export function getCachedDocumentSnapshotPromise(documentReference: DocumentReference): CachedDocumentSnapshotPromise {
