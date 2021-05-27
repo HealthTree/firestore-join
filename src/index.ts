@@ -8,7 +8,7 @@ import Query = firebase.firestore.Query;
 
 const cacheTimeout = 3000;
 
-let documentReferencePromiseMapCache: { [key: string]: DocumentReferenceFromCache } = {};
+let documentReferencePromiseMapCache: { [key: string]: CachedDocumentSnapshotPromise } = {};
 
 let serializedDocumentTransformer: Function = transformDates;
 
@@ -16,8 +16,7 @@ export function setSerializedDocumentTransformer(transformerFunction: Function) 
     serializedDocumentTransformer = transformerFunction;
 }
 
-export interface DocumentReferenceFromCache {
-    promise: Promise<DocumentSnapshot>,
+export interface CachedDocumentSnapshotPromise extends Promise<DocumentSnapshot>{
     time: number
 }
 
@@ -27,6 +26,30 @@ export interface IncludeConfig {
 
 export interface SerializedDocumentNested {
     [key: string]: SerializedDocument;
+}
+
+export class SerializedDocumentPromise extends Promise<SerializedDocument> {
+    ready = () => new Promise(async (resolve, reject) => {
+        this.then((serializedDocument: SerializedDocument) => {
+            serializedDocument.ready().then(resolve).catch(reject)
+        }).catch(reject)
+    })
+
+    constructor(fn: any) {
+        super(fn);
+    }
+}
+
+export class SerializedDocumentArrayPromise extends Promise<SerializedDocumentArray> {
+    ready = () => new Promise(async (resolve, reject) => {
+        this.then((serializedDocumentArray: SerializedDocumentArray) => {
+            serializedDocumentArray.ready().then(resolve).catch(reject)
+        }).catch(reject)
+    })
+
+    constructor(fn: any) {
+        super(fn);
+    }
 }
 
 export class SerializedDocumentArray extends Array<SerializedDocument> {
@@ -40,14 +63,20 @@ export class SerializedDocumentArray extends Array<SerializedDocument> {
         super(...docs)
     }
 
-    static fromDocumentReferenceArray = async (documentReferenceArray: [DocumentReference], includesConfig: IncludeConfig): Promise<SerializedDocumentArray> => {
-        const serializedDocuments = await Promise.all(documentReferenceArray.map(documentReference => SerializedDocument.fromDocumentReference(documentReference, includesConfig)))
-        return Object.setPrototypeOf(serializedDocuments, SerializedDocumentArray.prototype);
+    static fromDocumentReferenceArray = (documentReferenceArray: [DocumentReference], includesConfig: IncludeConfig): SerializedDocumentArrayPromise => {
+        return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
+            Promise.all(documentReferenceArray.map(documentReference => SerializedDocument.fromDocumentReference(documentReference, includesConfig))).then(serializedDocuments => {
+                resolve(Object.setPrototypeOf(serializedDocuments, SerializedDocumentArray.prototype))
+            }).catch(reject);
+        })
     }
 
-    static fromQuery = async (query: Query, includesConfig: IncludeConfig): Promise<SerializedDocumentArray> => {
-        const querySnapshot = await query.get();
-        return new SerializedDocumentArray(querySnapshot, includesConfig);
+    static fromQuery = (query: Query, includesConfig: IncludeConfig): SerializedDocumentArrayPromise => {
+        return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
+            query.get().then(querySnapshot => {
+                resolve(new SerializedDocumentArray(querySnapshot, includesConfig))
+            }).catch(reject);
+        });
     }
 
     allPromises() {
@@ -85,9 +114,12 @@ export class SerializedDocument {
         return serializedDocument;
     }
 
-    static fromDocumentReference = async (ref: DocumentReference, includeConfig: IncludeConfig): Promise<SerializedDocument> => {
-        const documentSnapshot = await getDocumentReferenceFromCache(ref).promise;
-        return new SerializedDocument(documentSnapshot, includeConfig);
+    static fromDocumentReference = (ref: DocumentReference, includeConfig: IncludeConfig): SerializedDocumentPromise => {
+        return new SerializedDocumentPromise((resolve: any, reject: any) => {
+            getCachedDocumentSnapshotPromise(ref)
+                .then(documentSnapshot => resolve(new SerializedDocument(documentSnapshot, includeConfig)))
+                .catch(reject);
+        })
     }
 
     processIncludes = (includeConfig: IncludeConfig) => {
@@ -120,7 +152,7 @@ export class SerializedDocument {
         _.set(this.promises, path, [])
         documentReferenceArray.forEach((documentReference: DocumentReference) => {
             const promise = new Promise((resolve, reject) => {
-                getDocumentReferenceFromCache(documentReference).promise.then(documentSnapshot => {
+                getCachedDocumentSnapshotPromise(documentReference).then(documentSnapshot => {
                     const includedSerializedDocument = serializedDocumentTransformer(new SerializedDocument(documentSnapshot, includeConfig))
                     _.get(this.included, path).push(includedSerializedDocument)
                     resolve(includedSerializedDocument)
@@ -132,7 +164,7 @@ export class SerializedDocument {
 
     includeReference = (path: string, documentReference: DocumentReference, includeConfig = {}) => {
         const promise = new Promise((resolve, reject) => {
-            getDocumentReferenceFromCache(documentReference).promise.then(documentSnapshot => {
+            getCachedDocumentSnapshotPromise(documentReference).then(documentSnapshot => {
                 const includedSerializedDocument = serializedDocumentTransformer(new SerializedDocument(documentSnapshot, includeConfig))
                 _.set(this.included, path, includedSerializedDocument)
                 resolve(includedSerializedDocument)
@@ -217,13 +249,12 @@ function isPlainObject(value: any) {
     return Object.prototype.toString.call(value) == '[object Object]' && value.constructor.name === 'Object';
 }
 
-function getDocumentReferenceFromCache(documentReference: DocumentReference): DocumentReferenceFromCache {
-    if (documentReferencePromiseMapCache[documentReference.path] && documentReferencePromiseMapCache[documentReference.path].time + cacheTimeout > Date.now()) {
+export function getCachedDocumentSnapshotPromise(documentReference: DocumentReference): CachedDocumentSnapshotPromise {
+    if (documentReferencePromiseMapCache[documentReference.path]?.time + cacheTimeout > Date.now()) {
         return documentReferencePromiseMapCache[documentReference.path];
     } else {
-        return documentReferencePromiseMapCache[documentReference.path] = {
-            promise: documentReference.get(),
-            time: Date.now()
-        }
+        const documentSnapshotPromise = (documentReference.get()) as CachedDocumentSnapshotPromise;
+        documentSnapshotPromise.time = Date.now();
+        return documentReferencePromiseMapCache[documentReference.path] = documentSnapshotPromise;
     }
 }
