@@ -4,11 +4,16 @@ import _ from 'lodash'
 import DocumentReference = firebase.firestore.DocumentReference
 import DocumentSnapshot = firebase.firestore.DocumentSnapshot
 import QuerySnapshot = firebase.firestore.QuerySnapshot
+import Query = firebase.firestore.Query;
+
+let cacheTimeout: number = 3000;
+
+let documentReferencePromiseMapCache: { [key: string]: CachedDocumentSnapshotPromise } = {};
 
 let serializedDocumentTransformer: Function = transformDates;
 
-export function setSerializedDocumentTransformer(transformerFunction: Function) {
-    serializedDocumentTransformer = transformerFunction;
+export interface CachedDocumentSnapshotPromise extends Promise<DocumentSnapshot>{
+    time: number
 }
 
 export interface IncludeConfig {
@@ -19,7 +24,31 @@ export interface SerializedDocumentNested {
     [key: string]: SerializedDocument;
 }
 
-export class SerializedDocumentArray extends Array {
+export class SerializedDocumentPromise extends Promise<SerializedDocument> {
+    ready = () => new Promise(async (resolve, reject) => {
+        this.then((serializedDocument: SerializedDocument) => {
+            serializedDocument.ready().then(resolve).catch(reject)
+        }).catch(reject)
+    })
+
+    constructor(fn: any) {
+        super(fn);
+    }
+}
+
+export class SerializedDocumentArrayPromise extends Promise<SerializedDocumentArray> {
+    ready = () => new Promise(async (resolve, reject) => {
+        this.then((serializedDocumentArray: SerializedDocumentArray) => {
+            serializedDocumentArray.ready().then(resolve).catch(reject)
+        }).catch(reject)
+    })
+
+    constructor(fn: any) {
+        super(fn);
+    }
+}
+
+export class SerializedDocumentArray extends Array<SerializedDocument> {
     constructor(querySnapshot: QuerySnapshot, includesConfig: IncludeConfig) {
         let docs: SerializedDocument[] = []
         if (querySnapshot.docs) {
@@ -27,7 +56,23 @@ export class SerializedDocumentArray extends Array {
                 return new SerializedDocument(doc, includesConfig)
             })
         }
-        super(...docs as any[])
+        super(...docs)
+    }
+
+    static fromDocumentReferenceArray = (documentReferenceArray: [DocumentReference], includesConfig: IncludeConfig): SerializedDocumentArrayPromise => {
+        return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
+            Promise.all(documentReferenceArray.map(documentReference => SerializedDocument.fromDocumentReference(documentReference, includesConfig))).then(serializedDocuments => {
+                resolve(Object.setPrototypeOf(serializedDocuments, SerializedDocumentArray.prototype))
+            }).catch(reject);
+        })
+    }
+
+    static fromQuery = (query: Query, includesConfig: IncludeConfig): SerializedDocumentArrayPromise => {
+        return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
+            query.get().then(querySnapshot => {
+                resolve(new SerializedDocumentArray(querySnapshot, includesConfig))
+            }).catch(reject);
+        });
     }
 
     allPromises() {
@@ -45,7 +90,6 @@ export class SerializedDocumentArray extends Array {
     }
 }
 
-
 export class SerializedDocument {
     data: any
     ref: firebase.firestore.DocumentReference
@@ -59,11 +103,19 @@ export class SerializedDocument {
         this.data = serializedDocumentTransformer(this).data;
     }
 
-    static createLocal = (ref: DocumentReference, data: any = {}) => {
+    static createLocal = (ref: DocumentReference, data: any = {}): SerializedDocument => {
         const serializedDocument = Object.create(SerializedDocument);
         serializedDocument.ref = ref;
         serializedDocument.data = data;
         return serializedDocument;
+    }
+
+    static fromDocumentReference = (ref: DocumentReference, includeConfig: IncludeConfig): SerializedDocumentPromise => {
+        return new SerializedDocumentPromise((resolve: any, reject: any) => {
+            getCachedDocumentSnapshotPromise(ref)
+                .then(documentSnapshot => resolve(new SerializedDocument(documentSnapshot, includeConfig)))
+                .catch(reject);
+        })
     }
 
     processIncludes = (includeConfig: IncludeConfig) => {
@@ -96,7 +148,7 @@ export class SerializedDocument {
         _.set(this.promises, path, [])
         documentReferenceArray.forEach((documentReference: DocumentReference) => {
             const promise = new Promise((resolve, reject) => {
-                documentReference.get().then(documentSnapshot => {
+                getCachedDocumentSnapshotPromise(documentReference).then(documentSnapshot => {
                     const includedSerializedDocument = serializedDocumentTransformer(new SerializedDocument(documentSnapshot, includeConfig))
                     _.get(this.included, path).push(includedSerializedDocument)
                     resolve(includedSerializedDocument)
@@ -108,7 +160,7 @@ export class SerializedDocument {
 
     includeReference = (path: string, documentReference: DocumentReference, includeConfig = {}) => {
         const promise = new Promise((resolve, reject) => {
-            documentReference.get().then(documentSnapshot => {
+            getCachedDocumentSnapshotPromise(documentReference).then(documentSnapshot => {
                 const includedSerializedDocument = serializedDocumentTransformer(new SerializedDocument(documentSnapshot, includeConfig))
                 _.set(this.included, path, includedSerializedDocument)
                 resolve(includedSerializedDocument)
@@ -167,13 +219,13 @@ export class SerializedDocument {
     })
 }
 
-function transformDates(serializedDocument: any) {
+function transformDates(serializedDocument: SerializedDocument) {
     serializedDocument.data = transformDatesHelper(serializedDocument.data);
     return serializedDocument;
 }
 
 function transformDatesHelper(data: { [key: string]: any }) {
-    Object.entries(data).forEach(([property, value]) => {
+    if (data) Object.entries(data).forEach(([property, value]) => {
         if (Array.isArray(value)) { // Array
             value.forEach((arrayValue: any, index) => {
                 if (isPlainObject(arrayValue)) {
@@ -191,4 +243,22 @@ function transformDatesHelper(data: { [key: string]: any }) {
 
 function isPlainObject(value: any) {
     return Object.prototype.toString.call(value) == '[object Object]' && value.constructor.name === 'Object';
+}
+
+export function setCacheTimeout(milliseconds: number) {
+    cacheTimeout = milliseconds;
+}
+
+export function setSerializedDocumentTransformer(transformerFunction: Function) {
+    serializedDocumentTransformer = transformerFunction;
+}
+
+export function getCachedDocumentSnapshotPromise(documentReference: DocumentReference): CachedDocumentSnapshotPromise {
+    if (documentReferencePromiseMapCache[documentReference.path]?.time + cacheTimeout > Date.now()) {
+        return documentReferencePromiseMapCache[documentReference.path];
+    } else {
+        const documentSnapshotPromise = (documentReference.get()) as CachedDocumentSnapshotPromise;
+        documentSnapshotPromise.time = Date.now();
+        return documentReferencePromiseMapCache[documentReference.path] = documentSnapshotPromise;
+    }
 }
