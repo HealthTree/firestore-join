@@ -12,7 +12,7 @@ let documentReferencePromiseMapCache: { [key: string]: CachedDocumentSnapshotPro
 
 let serializedDocumentTransformer: Function = transformDates;
 
-export interface CachedDocumentSnapshotPromise extends Promise<DocumentSnapshot>{
+export interface CachedDocumentSnapshotPromise extends Promise<DocumentSnapshot> {
     time: number
 }
 
@@ -76,7 +76,7 @@ export class SerializedDocumentArray extends Array<SerializedDocument> {
     }
 
     allPromises() {
-        return Promise.all(this.map(doc => doc.allPromises()))
+        return Promise.all(this.map(doc => Promise.all(doc.promisesArray)))
     }
 
     allPromisesRecursive() {
@@ -95,6 +95,8 @@ export class SerializedDocument {
     ref: firebase.firestore.DocumentReference
     included: Object = {}
     promises: Object = {}
+    promisesArray: Promise<any>[] = []
+    includedArray: SerializedDocument[] = []
 
     constructor(documentSnapshot: DocumentSnapshot, includeConfig: IncludeConfig = {}) {
         this.data = documentSnapshot.data()
@@ -151,10 +153,12 @@ export class SerializedDocument {
                 getCachedDocumentSnapshotPromise(documentReference).then(documentSnapshot => {
                     const includedSerializedDocument = serializedDocumentTransformer(new SerializedDocument(documentSnapshot, includeConfig))
                     _.get(this.included, path).push(includedSerializedDocument)
+                    this.includedArray.push(includedSerializedDocument);
                     resolve(includedSerializedDocument)
                 }).catch(reject)
             })
             _.get(this.promises, path).push(promise)
+            this.promisesArray.push(promise);
         })
     }
 
@@ -163,50 +167,21 @@ export class SerializedDocument {
             getCachedDocumentSnapshotPromise(documentReference).then(documentSnapshot => {
                 const includedSerializedDocument = serializedDocumentTransformer(new SerializedDocument(documentSnapshot, includeConfig))
                 _.set(this.included, path, includedSerializedDocument)
+                this.includedArray.push(includedSerializedDocument);
                 resolve(includedSerializedDocument)
             }).catch(reject)
         })
         _.set(this.promises, path, promise)
+        this.promisesArray.push(promise);
     }
 
-    allPromises = () => Promise.all(this.flattenPromises(Object.values(this.promises)))
-
-    flattenPromises = (values: any[]) => {
-        let promises: any[] = [];
-        values.forEach(value => {
-            if (typeof value.then === 'function') {
-
-                promises.push(value)
-            } else if (Array.isArray(value)) {
-                promises = [...promises, ...this.flattenPromises(value)];
-            } else if (typeof value === 'object') {
-                promises = [...promises, ...this.flattenPromises(Object.values(value))];
-            }
-        })
-        return promises;
-    }
 
     allPromisesRecursive = () => new Promise((resolve, reject) => {
-        this.allPromises().then(() => {
+        Promise.all(this.promisesArray).then(() => {
             const allPromises: Promise<any>[] = []
 
-            Object.values(this.included).forEach((includedValue: SerializedDocument | Array<SerializedDocument> | SerializedDocumentNested) => {
-                //Is single document relation
-                if (includedValue instanceof SerializedDocument) {
-                    return allPromises.push(includedValue.allPromisesRecursive())
-                }
-
-                //Is nested array relation SerializedDocument[]
-                if (Array.isArray(includedValue)) {
-                    includedValue.forEach((serializedDocument: SerializedDocument) => allPromises.push(serializedDocument.allPromisesRecursive()))
-                }
-
-                //Is nested object relation {key1: SerializedDocument, key2: SerializedDocument}
-                if (typeof includedValue === 'object' && includedValue !== null) {
-                    return Object.values(includedValue)
-                        .forEach((serializedDocument: SerializedDocument) => allPromises.push(serializedDocument.allPromisesRecursive()))
-                }
-
+            this.includedArray.forEach((includedValue: SerializedDocument) => {
+                allPromises.push(includedValue.allPromisesRecursive())
             })
             Promise.all(allPromises).then(res => {
                 resolve(res)
