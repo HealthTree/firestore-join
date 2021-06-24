@@ -105,10 +105,12 @@ export class SerializedDocument {
         this.data = serializedDocumentTransformer(this).data;
     }
 
-    static createLocal = (ref: DocumentReference, data: any = {}): SerializedDocument => {
+    static createLocal = (ref: DocumentReference, data: any = {}, includeConfig: IncludeConfig = {}): SerializedDocument => {
         const serializedDocument = Object.create(SerializedDocument);
-        serializedDocument.ref = ref;
         serializedDocument.data = data;
+        serializedDocument.ref = ref;
+        serializedDocument.processIncludes(includeConfig)
+        serializedDocument.data = serializedDocumentTransformer(serializedDocument).data;
         return serializedDocument;
     }
 
