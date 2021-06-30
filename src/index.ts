@@ -106,7 +106,7 @@ export class SerializedDocument {
     }
 
     static createLocal = (ref: DocumentReference, data: any = {}, includeConfig: IncludeConfig = {}): SerializedDocument => {
-        const serializedDocument = Object.create(SerializedDocument);
+        const serializedDocument = new SerializedDocument({ref, data: ()=> data} as DocumentSnapshot, includeConfig);
         serializedDocument.data = data;
         serializedDocument.ref = ref;
         serializedDocument.processIncludes(includeConfig)
