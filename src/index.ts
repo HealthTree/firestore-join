@@ -109,7 +109,6 @@ export class SerializedDocument {
         const serializedDocument = new SerializedDocument({ref, data: ()=> data} as DocumentSnapshot, includeConfig);
         serializedDocument.data = data;
         serializedDocument.ref = ref;
-        serializedDocument.processIncludes(includeConfig)
         serializedDocument.data = serializedDocumentTransformer(serializedDocument).data;
         return serializedDocument;
     }
