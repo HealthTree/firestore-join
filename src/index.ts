@@ -97,9 +97,11 @@ export class SerializedDocument {
     promises: Object = {}
     promisesArray: Promise<any>[] = []
     includedArray: SerializedDocument[] = []
+    documentSnapshot: DocumentSnapshot
 
     constructor(documentSnapshot: DocumentSnapshot, includeConfig: IncludeConfig = {}) {
         this.data = documentSnapshot.data()
+        this.documentSnapshot = documentSnapshot;
         this.ref = documentSnapshot.ref
         this.processIncludes(includeConfig)
         this.data = serializedDocumentTransformer(this).data;
