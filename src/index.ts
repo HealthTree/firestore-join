@@ -5,6 +5,7 @@ import DocumentReference = firebase.firestore.DocumentReference
 import DocumentSnapshot = firebase.firestore.DocumentSnapshot
 import QuerySnapshot = firebase.firestore.QuerySnapshot
 import Query = firebase.firestore.Query;
+import CollectionReference = firebase.firestore.CollectionReference;
 
 let cacheTimeout: number = 3000;
 
@@ -49,7 +50,7 @@ export class SerializedDocumentArrayPromise extends Promise<SerializedDocumentAr
 }
 
 export class SerializedDocumentArray extends Array<SerializedDocument> {
-    constructor(querySnapshot: QuerySnapshot, includesConfig: IncludeConfig) {
+    constructor(querySnapshot: QuerySnapshot, includesConfig: IncludeConfig | 'ALL') {
         let docs: SerializedDocument[] = []
         if (querySnapshot.docs) {
             docs = querySnapshot.docs.map(doc => {
@@ -59,7 +60,7 @@ export class SerializedDocumentArray extends Array<SerializedDocument> {
         super(...docs)
     }
 
-    static fromDocumentReferenceArray = (documentReferenceArray: [DocumentReference], includesConfig: IncludeConfig): SerializedDocumentArrayPromise => {
+    static fromDocumentReferenceArray = (documentReferenceArray: [DocumentReference], includesConfig: IncludeConfig | 'ALL'): SerializedDocumentArrayPromise => {
         return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
             Promise.all(documentReferenceArray.map(documentReference => SerializedDocument.fromDocumentReference(documentReference, includesConfig))).then(serializedDocuments => {
                 resolve(Object.setPrototypeOf(serializedDocuments, SerializedDocumentArray.prototype))
@@ -67,16 +68,16 @@ export class SerializedDocumentArray extends Array<SerializedDocument> {
         })
     }
 
-    static fromQuery = (query: Query, includesConfig: IncludeConfig): SerializedDocumentArrayPromise => {
+    static fromQuery = (collectionReferenceOrQuery: CollectionReference | Query, includesConfig: IncludeConfig | 'ALL'): SerializedDocumentArrayPromise => {
         return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
-            query.get().then(querySnapshot => {
+            collectionReferenceOrQuery.get().then(querySnapshot => {
                 resolve(new SerializedDocumentArray(querySnapshot, includesConfig))
             }).catch(reject);
         });
     }
 
     allPromises() {
-        return Promise.all(this.map(doc => Promise.all(doc.promisesArray)))
+        return Promise.all(this.map(doc => Promise.all(doc._promisesArray)))
     }
 
     allPromisesRecursive() {
@@ -95,27 +96,27 @@ export class SerializedDocument {
     ref: firebase.firestore.DocumentReference
     included: Object = {}
     promises: Object = {}
-    promisesArray: Promise<any>[] = []
-    includedArray: SerializedDocument[] = []
-    documentSnapshot: DocumentSnapshot
+    _promisesArray: Promise<any>[] = []
+    _includedArray: SerializedDocument[] = []
+    snapshot: DocumentSnapshot
 
-    constructor(documentSnapshot: DocumentSnapshot, includeConfig: IncludeConfig = {}) {
+    constructor(documentSnapshot: DocumentSnapshot, includeConfig: IncludeConfig | 'ALL' = {}) {
         this.data = documentSnapshot.data()
-        this.documentSnapshot = documentSnapshot;
+        this.snapshot = documentSnapshot;
         this.ref = documentSnapshot.ref
         this.processIncludes(includeConfig)
         this.data = serializedDocumentTransformer(this).data;
     }
 
-    static createLocal = (ref: DocumentReference, data: any = {}, includeConfig: IncludeConfig = {}): SerializedDocument => {
-        const serializedDocument = new SerializedDocument({ref, data: ()=> data} as DocumentSnapshot, includeConfig);
+    static createLocal = (ref: DocumentReference, data: any = {}, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocument => {
+        const serializedDocument = new SerializedDocument({ref, data: () => data} as DocumentSnapshot, includeConfig);
         serializedDocument.data = data;
         serializedDocument.ref = ref;
         serializedDocument.data = serializedDocumentTransformer(serializedDocument).data;
         return serializedDocument;
     }
 
-    static fromDocumentReference = (ref: DocumentReference, includeConfig: IncludeConfig): SerializedDocumentPromise => {
+    static fromDocumentReference = (ref: DocumentReference, includeConfig: IncludeConfig | 'ALL'): SerializedDocumentPromise => {
         return new SerializedDocumentPromise((resolve: any, reject: any) => {
             getCachedDocumentSnapshotPromise(ref)
                 .then(documentSnapshot => resolve(new SerializedDocument(documentSnapshot, includeConfig)))
@@ -123,27 +124,43 @@ export class SerializedDocument {
         })
     }
 
-    processIncludes = (includeConfig: IncludeConfig) => {
+    processIncludes = (includeConfig: IncludeConfig | 'ALL') => {
+        // Special case that recursively finds documentReferences and includes them.
+        if (includeConfig === 'ALL') {
+            console.log('All received');
+            return this.findReferences(this.data, [])
+        }
+
         Object.entries(includeConfig).forEach(([path, includeValue]) => {
             const valueInData = _.get(this.data, path)
 
-            if (valueInData && valueInData.get !== undefined) { // Is simple relation pointing to a reference on document data
-                return this.includeReference(path, valueInData, includeValue)
+            // Is simple relation pointing to a reference on document data
+            if (valueInData && valueInData.get !== undefined) {
+                return this.includeDocumentReference(path, valueInData, includeValue)
             }
 
-            if (Array.isArray(valueInData)) {//Is nested array relation SerializedDocument[]
+            //Is nested array relation SerializedDocument[]
+            if (Array.isArray(valueInData)) {
                 return this.includeReferenceArray(path, valueInData, includeValue)
             }
 
-            if (typeof valueInData === 'object' && valueInData !== null) {//Is nested object relation {key1: SerializedDocument, key2: SerializedDocument}
+            //Is nested object relation {key1: SerializedDocument, key2: SerializedDocument}
+            if (typeof valueInData === 'object' && valueInData !== null) {
                 return Object.entries(valueInData)
                     .forEach(([key, documentReference]) => {
-                        this.includeReference(`${path}.${key}`, documentReference as DocumentReference, includeValue)
+                        this.includeDocumentReference(`${path}.${key}`, documentReference as DocumentReference, includeValue)
                     })
             }
 
-            if (typeof includeValue === 'function') { //Is function relation, the function will return a reference to be included.
-                return this.includeReference(path, includeValue(this))
+            //Is function relation, the function will return a reference to be included.
+            if (typeof includeValue === 'function') {
+                const returnedValue = includeValue(this);
+                if (isCollectionReferenceOrQuery(returnedValue)) {
+                    return this.includeCollectionReferenceOrQuery(path, returnedValue)
+                } else if (isDocumentReference(returnedValue)) {
+                    return this.includeDocumentReference(path, returnedValue)
+                }
+
             }
         })
     }
@@ -156,34 +173,66 @@ export class SerializedDocument {
                 getCachedDocumentSnapshotPromise(documentReference).then(documentSnapshot => {
                     const includedSerializedDocument = serializedDocumentTransformer(new SerializedDocument(documentSnapshot, includeConfig))
                     _.get(this.included, path).push(includedSerializedDocument)
-                    this.includedArray.push(includedSerializedDocument);
+                    this._includedArray.push(includedSerializedDocument);
                     resolve(includedSerializedDocument)
                 }).catch(reject)
             })
             _.get(this.promises, path).push(promise)
-            this.promisesArray.push(promise);
+            this._promisesArray.push(promise);
         })
     }
 
-    includeReference = (path: string, documentReference: DocumentReference, includeConfig = {}) => {
+    includeDocumentReference = (path: string, documentReference: DocumentReference, includeConfig = {}) => {
         const promise = new Promise((resolve, reject) => {
             getCachedDocumentSnapshotPromise(documentReference).then(documentSnapshot => {
                 const includedSerializedDocument = serializedDocumentTransformer(new SerializedDocument(documentSnapshot, includeConfig))
                 _.set(this.included, path, includedSerializedDocument)
-                this.includedArray.push(includedSerializedDocument);
+                this._includedArray.push(includedSerializedDocument);
                 resolve(includedSerializedDocument)
             }).catch(reject)
         })
         _.set(this.promises, path, promise)
-        this.promisesArray.push(promise);
+        this._promisesArray.push(promise);
     }
 
+    includeCollectionReferenceOrQuery = (path: string, collectionReferenceOrQuery: CollectionReference | Query, includeConfig = {}) => {
+        const promise = new Promise(async (resolve, reject) => {
+            SerializedDocumentArray.fromQuery(collectionReferenceOrQuery, includeConfig).then(serializedDocumentArray => {
+                _.set(this.included, path, serializedDocumentArray);
+                resolve(serializedDocumentArray)
+            }).catch(reject)
+        });
+        _.set(this.promises, path, promise)
+        this._promisesArray.push(promise);
+    }
+
+    findReferences = (data: { [key: string]: any }, _pathSegments: Array<string>) => {
+        if (data) {
+            Object.entries(data).forEach(([property, value]) => {
+                const pathSegments = [..._pathSegments, property];
+                if (isDocumentReference(value)) { //Is documentReference
+                    this.includeDocumentReference(buildReferencePathFromSegments(pathSegments), value);
+                } else if (Array.isArray(value)) { // Array
+                    value.forEach((arrayValue: any, index) => {
+                        const itemPathSegments = [...pathSegments, `[${index}]`];
+                        if (isPlainObject(arrayValue)) {
+                            this.findReferences(arrayValue, itemPathSegments);
+                        } else if (isDocumentReference(arrayValue)) {
+                            this.includeDocumentReference(buildReferencePathFromSegments(itemPathSegments), arrayValue)
+                        }
+                    });
+                } else if (isPlainObject(value)) { // Is an object, not a reference nor a date!
+                    this.findReferences(value, pathSegments); // Regular object {}
+                }
+            })
+        }
+    }
 
     allPromisesRecursive = () => new Promise((resolve, reject) => {
-        Promise.all(this.promisesArray).then(() => {
+        Promise.all(this._promisesArray).then(() => {
             const allPromises: Promise<any>[] = []
 
-            this.includedArray.forEach((includedValue: SerializedDocument) => {
+            this._includedArray.forEach((includedValue: SerializedDocument) => {
                 allPromises.push(includedValue.allPromisesRecursive())
             })
             Promise.all(allPromises).then(res => {
@@ -216,11 +265,24 @@ function transformDatesHelper(data: { [key: string]: any }) {
             data[property] = transformDatesHelper(value); // Regular object {}
         }
     });
+    ``
     return data;
 }
 
 function isPlainObject(value: any) {
     return Object.prototype.toString.call(value) == '[object Object]' && value.constructor.name === 'Object';
+}
+
+function buildReferencePathFromSegments(pathSegments: Array<string>): string {
+    return pathSegments.join('.').replaceAll('.[', '[');
+}
+
+function isDocumentReference(value: any) {
+    return typeof value?.get === 'function';
+}
+
+function isCollectionReferenceOrQuery(value: any) {
+    return typeof value?.where === 'function' && typeof value?.get === 'function';
 }
 
 export function setCacheTimeout(milliseconds: number) {

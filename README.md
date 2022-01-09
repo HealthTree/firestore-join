@@ -29,7 +29,7 @@ The building blocks for this library are `SerializedDocument` and `SerializedDoc
 ```js
 //Only recommended methods and properties are documented in this interface
 interface SerializedDocument{
-  // Data returned after calling documentSnapshot.data() and transforming the data, by default it converts firestore timestamps into JS dates.
+  // Data returned after calling snapshot.data() and transforming the data, by default it converts firestore timestamps into JS dates.
   data: any 
 
   // Firestore document reference
@@ -42,9 +42,9 @@ interface SerializedDocument{
   promises: Object = {} 
   
   // DocumentSnapshot of the document if document came from server.
-  documentSnapshot: DocumentSnapshot
+  snapshot: DocumentSnapshot
 
-  constructor(documentSnapshot: DocumentSnapshot, includeConfig: IncludeConfig = {}) {
+  constructor(snapshot: DocumentSnapshot, includeConfig: IncludeConfig = {}) {
   ...
   }
   
