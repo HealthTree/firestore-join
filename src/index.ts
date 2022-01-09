@@ -1,11 +1,6 @@
 import 'core-js/features/promise'
-import firebase from 'firebase'
-import _ from 'lodash'
-import DocumentReference = firebase.firestore.DocumentReference
-import DocumentSnapshot = firebase.firestore.DocumentSnapshot
-import QuerySnapshot = firebase.firestore.QuerySnapshot
-import Query = firebase.firestore.Query;
-import CollectionReference = firebase.firestore.CollectionReference;
+import { DocumentReference, CollectionReference, DocumentSnapshot, getDoc, getDocs, Query, QuerySnapshot } from 'firebase/firestore';
+import _ from "lodash";
 
 let cacheTimeout: number = 3000;
 
@@ -70,7 +65,7 @@ export class SerializedDocumentArray extends Array<SerializedDocument> {
 
     static fromQuery = (collectionReferenceOrQuery: CollectionReference | Query, includesConfig: IncludeConfig | 'ALL'): SerializedDocumentArrayPromise => {
         return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
-            collectionReferenceOrQuery.get().then(querySnapshot => {
+            getDocs(collectionReferenceOrQuery).then(querySnapshot => {
                 resolve(new SerializedDocumentArray(querySnapshot, includesConfig))
             }).catch(reject);
         });
@@ -93,7 +88,7 @@ export class SerializedDocumentArray extends Array<SerializedDocument> {
 
 export class SerializedDocument {
     data: any
-    ref: firebase.firestore.DocumentReference
+    ref: DocumentReference
     included: Object = {}
     promises: Object = {}
     _promisesArray: Promise<any>[] = []
@@ -135,7 +130,7 @@ export class SerializedDocument {
             const valueInData = _.get(this.data, path)
 
             // Is simple relation pointing to a reference on document data
-            if (valueInData && valueInData.get !== undefined) {
+            if (valueInData && isDocumentReference(valueInData)) {
                 return this.includeDocumentReference(path, valueInData, includeValue)
             }
 
@@ -145,8 +140,9 @@ export class SerializedDocument {
             }
 
             //Is nested object relation {key1: SerializedDocument, key2: SerializedDocument}
-            if (typeof valueInData === 'object' && valueInData !== null) {
+            if (isPlainObject(valueInData)) {
                 return Object.entries(valueInData)
+                    .filter(([, documentReference]) => isDocumentReference(documentReference))
                     .forEach(([key, documentReference]) => {
                         this.includeDocumentReference(`${path}.${key}`, documentReference as DocumentReference, includeValue)
                     })
@@ -278,11 +274,11 @@ function buildReferencePathFromSegments(pathSegments: Array<string>): string {
 }
 
 function isDocumentReference(value: any) {
-    return typeof value?.get === 'function';
+    return value?.firestore && value?.path.split('/').length % 2 === 0; // If path is even, it's a document
 }
 
 function isCollectionReferenceOrQuery(value: any) {
-    return typeof value?.where === 'function' && typeof value?.get === 'function';
+    return value?.firestore && ((value.type == 'query' || value.type == 'collection') || value?.path.split('/').length % 2 === 1); // If path is odd, it's a collection
 }
 
 export function setCacheTimeout(milliseconds: number) {
@@ -297,7 +293,7 @@ export function getCachedDocumentSnapshotPromise(documentReference: DocumentRefe
     if (documentReferencePromiseMapCache[documentReference.path]?.time + cacheTimeout > Date.now()) {
         return documentReferencePromiseMapCache[documentReference.path];
     } else {
-        const documentSnapshotPromise = (documentReference.get()) as CachedDocumentSnapshotPromise;
+        const documentSnapshotPromise = (getDoc(documentReference)) as CachedDocumentSnapshotPromise;
         documentSnapshotPromise.time = Date.now();
         return documentReferencePromiseMapCache[documentReference.path] = documentSnapshotPromise;
     }
