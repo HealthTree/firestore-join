@@ -6,6 +6,7 @@ import DocumentSnapshot = firebase.firestore.DocumentSnapshot
 import QuerySnapshot = firebase.firestore.QuerySnapshot
 import Query = firebase.firestore.Query;
 import CollectionReference = firebase.firestore.CollectionReference;
+import Firestore = firebase.firestore.Firestore;
 
 let cacheTimeout: number = 3000;
 
@@ -19,6 +20,11 @@ export interface CachedDocumentSnapshotPromise extends Promise<DocumentSnapshot>
 
 export interface IncludeConfig {
     [key: string]: Function | Object;
+}
+
+export interface JSONRef {
+    _type: string;
+    path: string;
 }
 
 export interface SerializedDocumentNested {
@@ -76,6 +82,8 @@ export class SerializedDocumentArray extends Array<SerializedDocument> {
         });
     }
 
+    static fromJSON = (obj: any, firestore: Firestore): SerializedDocumentArray => fromJSON(obj, firestore)
+
     allPromises() {
         return Promise.all(this.map(doc => Promise.all(doc._promisesArray)))
     }
@@ -123,6 +131,10 @@ export class SerializedDocument {
                 .catch(reject);
         })
     }
+
+    static fromJSON = (obj: any, firestore: Firestore): SerializedDocument => fromJSON(obj, firestore)
+
+    static toJSON = (obj: any): string => toJSON(obj)
 
     processIncludes = (includeConfig: IncludeConfig | 'ALL') => {
         // Special case that recursively finds documentReferences and includes them.
@@ -244,6 +256,8 @@ export class SerializedDocument {
     ready = () => new Promise(async (resolve, reject) => {
         this.allPromisesRecursive().then(() => resolve(this)).catch(reject)
     })
+
+    toJSON = () => toJSON(this)
 }
 
 function transformDates(serializedDocument: SerializedDocument) {
@@ -301,4 +315,93 @@ export function getCachedDocumentSnapshotPromise(documentReference: DocumentRefe
         documentSnapshotPromise.time = Date.now();
         return documentReferencePromiseMapCache[documentReference.path] = documentSnapshotPromise;
     }
+}
+
+function convertRefToObject(ref: firebase.firestore.DocumentReference) {
+    return {
+        _type: 'DocumentReference',
+        path: ref.path
+    }
+}
+
+function convertRefsToObject(data: any) {
+    if (data) {
+        if (data instanceof SerializedDocument) {
+            data = _.pick(data, ['data', 'included', 'ref', 'snapshot'])
+            data.snapshot = {
+                ref: convertRefToObject(data.ref),
+                id: data.snapshot.id,
+                exists: data.snapshot.exists
+            }
+        }
+        if (typeof data === 'object') {
+            Object.entries(data).forEach(([property, value]) => {
+                if (isDocumentReference(value)) {
+                    data[property] = convertRefToObject(value as firebase.firestore.DocumentReference);
+                } else if (Array.isArray(value)) {
+                    value.forEach((arrayValue, index) => {
+                        value[index] = convertRefsToObject(arrayValue);
+                    });
+                } else if (typeof data === 'object'){
+                    data[property] = convertRefsToObject(value);
+                } else {
+                    return value;
+                }
+            });
+        } else {
+            return data;
+        }
+    }
+    return data;
+}
+
+function convertJSONRefToRef(jsonRef: JSONRef, firestore: Firestore) {
+    const isDoc = jsonRef.path.split('/').length % 2 === 0;
+    if(isDoc) {
+        return firestore.doc(jsonRef.path);
+    }
+    return firestore.collection(jsonRef.path);
+}
+
+export function toJSON(data: { [key: string]: any }) {
+    const copy = _.cloneDeep(data);
+    const toStringify = convertRefsToObject(copy);
+    return JSON.stringify(toStringify);
+}
+
+function isJSONRef(obj: any) {
+    if (typeof obj !== 'object') return false;
+    const keys = Object.keys(obj);
+    if (keys.length === 2 &&  obj._type === 'DocumentReference') {
+        return true;
+    }
+    return false;
+}
+
+function processJSONRefsToRef(data: any, firestore: Firestore) {
+    if (data) {
+        if (typeof data === 'object') {
+            Object.entries(data).forEach(([property, value]) => {
+                if (isJSONRef(value)) {//Is documentReference
+                    data[property] = convertJSONRefToRef(value as JSONRef, firestore);
+                } else if (Array.isArray(value)) {
+                    value.forEach((arrayValue, index) => {
+                        value[index] = processJSONRefsToRef(arrayValue, firestore);
+                    });
+                } else if (typeof data === 'object'){
+                    data[property] = processJSONRefsToRef(value, firestore);
+                } else {
+                    return value;
+                }
+            });
+        } else {
+            return data;
+        }
+    }
+    return data;
+}
+
+export function fromJSON(data: string, firestore: Firestore) {
+   const obj = JSON.parse(data);
+   return processJSONRefsToRef(obj, firestore);
 }
