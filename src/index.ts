@@ -261,7 +261,6 @@ function transformDatesHelper(data: { [key: string]: any }) {
             data[property] = transformDatesHelper(value); // Regular object {}
         }
     });
-    ``
     return data;
 }
 
