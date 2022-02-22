@@ -151,10 +151,18 @@ export class SerializedDocument {
             //Is function relation, the function will return a reference to be included.
             if (typeof includeValue === 'function') {
                 const returnedValue = includeValue(this);
-                if (isCollectionReferenceOrQuery(returnedValue)) {
-                    return this.includeCollectionReferenceOrQuery(path, returnedValue)
-                } else if (isDocumentReference(returnedValue)) {
-                    return this.includeDocumentReference(path, returnedValue)
+                let reference = returnedValue,
+                    include;
+
+                if (returnedValue.hasOwnProperty('include')) {
+                    include = returnedValue.include;
+                    reference = returnedValue.reference;
+                }
+
+                if (isCollectionReferenceOrQuery(reference)) {
+                    return this.includeCollectionReferenceOrQuery(path, reference, include)
+                } else if (isDocumentReference(reference)) {
+                    return this.includeDocumentReference(path, reference, include)
                 }
 
             }

@@ -3,7 +3,7 @@
     "type": "git",
     "url": "https://github.com/HealthTree/firestore-join"
   },
-  "version": "0.6.0",
+  "version": "0.6.1",
   "license": "MIT",
   "main": "dist/index.js",
   "typings": "dist/index.d.ts",
@@ -47,7 +47,7 @@
       "limit": "10 KB"
     }
   ],
-  "peerDependencies" : {
+  "peerDependencies": {
     "firebase": "^9.1.0"
   },
   "devDependencies": {
