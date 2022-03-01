@@ -82,7 +82,7 @@ export class SerializedDocumentArray extends Array<SerializedDocument> {
         });
     }
 
-    static fromJSON = (obj: any, firestore: Firestore): SerializedDocumentArray => fromJSON(obj, firestore)
+    static fromJSON = (obj: string, firestore: Firestore): SerializedDocumentArray => fromJSON(obj, firestore)
 
     allPromises() {
         return Promise.all(this.map(doc => Promise.all(doc._promisesArray)))
@@ -132,7 +132,7 @@ export class SerializedDocument {
         })
     }
 
-    static fromJSON = (obj: any, firestore: Firestore): SerializedDocument => fromJSON(obj, firestore)
+    static fromJSON = (obj: string, firestore: Firestore): SerializedDocument => fromJSON(obj, firestore)
 
     static toJSON = (obj: any): string => toJSON(obj)
 
