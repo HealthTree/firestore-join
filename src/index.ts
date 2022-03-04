@@ -334,22 +334,13 @@ function convertRefsToObject(data: any) {
                 exists: data.snapshot.exists
             }
         }
-        if (typeof data === 'object') {
-            Object.entries(data).forEach(([property, value]) => {
-                if (isDocumentReference(value)) {
-                    data[property] = convertRefToObject(value as firebase.firestore.DocumentReference);
-                } else if (Array.isArray(value)) {
-                    value.forEach((arrayValue, index) => {
-                        value[index] = convertRefsToObject(arrayValue);
-                    });
-                } else if (typeof data === 'object'){
-                    data[property] = convertRefsToObject(value);
-                } else {
-                    return value;
-                }
-            });
-        } else {
-            return data;
+
+        if (isDocumentReference(data))
+            return convertRefToObject(data)
+        else if (typeof data === 'object') {
+            for (let key in data) {
+                data[key] = convertRefsToObject(data[key])
+            }
         }
     }
     return data;
@@ -380,23 +371,13 @@ function isJSONRef(obj: any) {
 
 function processJSONRefsToRef(data: any, firestore: Firestore) {
     if (data) {
-        if (typeof data === 'object') {
-            Object.entries(data).forEach(([property, value]) => {
-                if (isJSONRef(value)) {//Is documentReference
-                    data[property] = convertJSONRefToRef(value as JSONRef, firestore);
-                } else if (Array.isArray(value)) {
-                    value.forEach((arrayValue, index) => {
-                        value[index] = processJSONRefsToRef(arrayValue, firestore);
-                    });
-                } else if (typeof data === 'object'){
-                    data[property] = processJSONRefsToRef(value, firestore);
-                } else {
-                    return value;
-                }
-            });
-        } else {
-            return data;
+      if (isJSONRef(data))
+        return convertJSONRefToRef(data, firestore)
+      else if (typeof data === 'object') {
+        for (let key in data) {
+          data[key] = processJSONRefsToRef(data[key], firestore)
         }
+      }
     }
     return data;
 }
