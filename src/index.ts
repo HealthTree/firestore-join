@@ -203,6 +203,7 @@ export class SerializedDocument {
         const promise = new Promise(async (resolve, reject) => {
             SerializedDocumentArray.fromQuery(collectionReferenceOrQuery, includeConfig).then(serializedDocumentArray => {
                 _.set(this.included, path, serializedDocumentArray);
+                this._includedArray.push(...serializedDocumentArray);
                 resolve(serializedDocumentArray)
             }).catch(reject)
         });
