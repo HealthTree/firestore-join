@@ -22,14 +22,20 @@ export interface IncludeConfig {
     [key: string]: Function | Object;
 }
 
-export interface JSONRef {
+export interface JoinRef {
     _type: string;
     path: string;
+}
+
+export interface JoinDate {
+    _type: string;
+    value: string;
 }
 
 export interface SerializedDocumentNested {
     [key: string]: SerializedDocument;
 }
+
 
 export class SerializedDocumentPromise extends Promise<SerializedDocument> {
     ready = () => new Promise(async (resolve, reject) => {
@@ -317,50 +323,63 @@ export function getCachedDocumentSnapshotPromise(documentReference: DocumentRefe
     }
 }
 
-function convertRefToObject(ref: firebase.firestore.DocumentReference) {
+function convertRefToJoinRef(ref: firebase.firestore.DocumentReference) {
     return {
         _type: 'DocumentReference',
         path: ref.path
     }
 }
 
-function convertRefsToObject(data: any) {
+function convertJSDateToJoinDate(obj: Date) {
+    return {
+        _type: 'Date',
+        value: obj.toString()
+    }
+}
+
+function preprocessObjectToStringify(data: any) {
     if (data) {
         if (data instanceof SerializedDocument) {
             data = _.pick(data, ['data', 'included', 'ref', 'snapshot'])
             data.snapshot = {
-                ref: convertRefToObject(data.ref),
+                ref: convertRefToJoinRef(data.ref),
                 id: data.snapshot.id,
                 exists: data.snapshot.exists
             }
         }
 
-        if (isDocumentReference(data))
-            return convertRefToObject(data)
-        else if (typeof data === 'object') {
+        if (isDocumentReference(data)) {
+            return convertRefToJoinRef(data)
+        } else if (isJSDate(data)){
+            return convertJSDateToJoinDate(data)
+        } else if ((typeof data === 'object')){
             for (let key in data) {
-                data[key] = convertRefsToObject(data[key])
+                data[key] = preprocessObjectToStringify(data[key])
             }
         }
     }
     return data;
 }
 
-function convertJSONRefToRef(jsonRef: JSONRef, firestore: Firestore) {
-    const isDoc = jsonRef.path.split('/').length % 2 === 0;
+function convertJoinRefToRef(JoinRef: JoinRef, firestore: Firestore) {
+    const isDoc = JoinRef.path.split('/').length % 2 === 0;
     if(isDoc) {
-        return firestore.doc(jsonRef.path);
+        return firestore.doc(JoinRef.path);
     }
-    return firestore.collection(jsonRef.path);
+    return firestore.collection(JoinRef.path);
+}
+
+function convertJoinDateToJSDate(joinDate: JoinDate) {
+   return new Date(joinDate.value);
 }
 
 export function toJSON(data: { [key: string]: any }) {
     const copy = _.cloneDeep(data);
-    const toStringify = convertRefsToObject(copy);
+    const toStringify = preprocessObjectToStringify(copy);
     return JSON.stringify(toStringify);
 }
 
-function isJSONRef(obj: any) {
+function isJoinRef(obj: any) {
     if (typeof obj !== 'object') return false;
     const keys = Object.keys(obj);
     if (keys.length === 2 &&  obj._type === 'DocumentReference') {
@@ -369,20 +388,35 @@ function isJSONRef(obj: any) {
     return false;
 }
 
-function processJSONRefsToRef(data: any, firestore: Firestore) {
+function isJSDate(obj: any) {
+    return obj instanceof Date
+}
+
+function isJoinDate(obj: any) {
+    if (typeof obj !== 'object') return false;
+    const keys = Object.keys(obj);
+    if (keys.length === 2 &&  obj._type === 'Date') {
+        return true;
+    }
+    return false;
+}
+
+function processParsedJoinJSON(data: any, firestore: Firestore) {
     if (data) {
-      if (isJSONRef(data))
-        return convertJSONRefToRef(data, firestore)
-      else if (typeof data === 'object') {
-        for (let key in data) {
-          data[key] = processJSONRefsToRef(data[key], firestore)
+        if(isJoinRef(data)) {
+            return convertJoinRefToRef(data, firestore)
+        } else if(isJoinDate(data)) {
+            return convertJoinDateToJSDate(data)
+        } else if(typeof data === 'object') {
+            for (let key in data) {
+                data[key] = processParsedJoinJSON(data[key], firestore)
+            }
         }
-      }
     }
     return data;
 }
 
 export function fromJSON(data: string, firestore: Firestore) {
    const obj = JSON.parse(data);
-   return processJSONRefsToRef(obj, firestore);
+   return processParsedJoinJSON(obj, firestore);
 }
