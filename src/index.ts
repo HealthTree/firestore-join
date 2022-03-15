@@ -103,6 +103,8 @@ export class SerializedDocumentArray extends Array<SerializedDocument> {
             this.allPromisesRecursive().then(() => resolve(this)).catch(reject)
         })
     }
+
+    toJSON() { return toJSON(this)}
 }
 
 export class SerializedDocument {
