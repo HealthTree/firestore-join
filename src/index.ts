@@ -104,7 +104,7 @@ export class SerializedDocumentArray extends Array<SerializedDocument> {
         })
     }
 
-    toJSON() { return toJSON(this)}
+    JSONStringify() {return toJSON(this)}
 }
 
 export class SerializedDocument {
@@ -265,7 +265,7 @@ export class SerializedDocument {
         this.allPromisesRecursive().then(() => resolve(this)).catch(reject)
     })
 
-    toJSON = () => toJSON(this)
+    JSONStringify = () => toJSON(this)
 }
 
 function transformDates(serializedDocument: SerializedDocument) {
