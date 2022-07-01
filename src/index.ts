@@ -62,7 +62,7 @@ export class SerializedDocumentArrayPromise extends Promise<SerializedDocumentAr
 }
 
 export class SerializedDocumentArray extends Array<SerializedDocument> {
-    constructor(querySnapshot: QuerySnapshot, includesConfig: IncludeConfig | 'ALL') {
+    constructor(querySnapshot: QuerySnapshot, includesConfig: IncludeConfig | 'ALL' = {}) {
         let docs: SerializedDocument[] = []
         if (querySnapshot.docs) {
             docs = querySnapshot.docs.map(doc => {
@@ -72,7 +72,7 @@ export class SerializedDocumentArray extends Array<SerializedDocument> {
         super(...docs)
     }
 
-    static fromDocumentReferenceArray = (documentReferenceArray: [DocumentReference], includesConfig: IncludeConfig | 'ALL'): SerializedDocumentArrayPromise => {
+    static fromDocumentReferenceArray = (documentReferenceArray: [DocumentReference], includesConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentArrayPromise => {
         return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
             Promise.all(documentReferenceArray.map(documentReference => SerializedDocument.fromDocumentReference(documentReference, includesConfig))).then(serializedDocuments => {
                 resolve(Object.setPrototypeOf(serializedDocuments, SerializedDocumentArray.prototype))
@@ -80,7 +80,7 @@ export class SerializedDocumentArray extends Array<SerializedDocument> {
         })
     }
 
-    static fromQuery = (collectionReferenceOrQuery: CollectionReference | Query, includesConfig: IncludeConfig | 'ALL'): SerializedDocumentArrayPromise => {
+    static fromQuery = (collectionReferenceOrQuery: CollectionReference | Query, includesConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentArrayPromise => {
         return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
             collectionReferenceOrQuery.get().then(querySnapshot => {
                 resolve(new SerializedDocumentArray(querySnapshot, includesConfig))
