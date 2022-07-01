@@ -38,7 +38,7 @@ export interface SerializedDocumentNested {
 
 
 export class SerializedDocumentPromise extends Promise<SerializedDocument> {
-    ready = () => new Promise(async (resolve, reject) => {
+    ready = (): Promise<SerializedDocument> => new Promise(async (resolve, reject) => {
         this.then((serializedDocument: SerializedDocument) => {
             serializedDocument.ready().then(resolve).catch(reject)
         }).catch(reject)
@@ -261,7 +261,7 @@ export class SerializedDocument {
         }).catch(reject)
     })
 
-    ready = () => new Promise(async (resolve, reject) => {
+    ready = (): Promise<SerializedDocument> => new Promise(async (resolve, reject) => {
         this.allPromisesRecursive().then(() => resolve(this)).catch(reject)
     })
 
