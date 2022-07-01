@@ -132,7 +132,7 @@ export class SerializedDocument {
         return serializedDocument;
     }
 
-    static fromDocumentReference = (ref: DocumentReference, includeConfig: IncludeConfig | 'ALL'): SerializedDocumentPromise => {
+    static fromDocumentReference = (ref: DocumentReference, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentPromise => {
         return new SerializedDocumentPromise((resolve: any, reject: any) => {
             getCachedDocumentSnapshotPromise(ref)
                 .then(documentSnapshot => resolve(new SerializedDocument(documentSnapshot, includeConfig)))
