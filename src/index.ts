@@ -50,7 +50,7 @@ export class SerializedDocumentPromise extends Promise<SerializedDocument> {
 }
 
 export class SerializedDocumentArrayPromise extends Promise<SerializedDocumentArray> {
-    ready = () => new Promise(async (resolve, reject) => {
+    ready = (): Promise<SerializedDocumentArray> => new Promise(async (resolve, reject) => {
         this.then((serializedDocumentArray: SerializedDocumentArray) => {
             serializedDocumentArray.ready().then(resolve).catch(reject)
         }).catch(reject)
@@ -98,7 +98,7 @@ export class SerializedDocumentArray extends Array<SerializedDocument> {
         return Promise.all(this.map(doc => doc.allPromisesRecursive()))
     }
 
-    ready() {
+    ready(): Promise<SerializedDocumentArray> {
         return new Promise(async (resolve, reject) => {
             this.allPromisesRecursive().then(() => resolve(this)).catch(reject)
         })
