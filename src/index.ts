@@ -32,14 +32,15 @@ export interface JoinDate {
     value: string;
 }
 
+// TODO solve this <any>
 export interface SerializedDocumentNested {
-    [key: string]: SerializedDocument;
+    [key: string]: SerializedDocument<any>;
 }
 
-
-export class SerializedDocumentPromise extends Promise<SerializedDocument> {
-    ready = (): Promise<SerializedDocument> => new Promise(async (resolve, reject) => {
-        this.then((serializedDocument: SerializedDocument) => {
+// TODO solved ?
+export class SerializedDocumentPromise<T extends SerializedDocument<T>> extends Promise<SerializedDocument<T>> {
+    ready = (): Promise<SerializedDocument<T>> => new Promise(async (resolve, reject) => {
+        this.then((serializedDocument: SerializedDocument<T>) => {
             serializedDocument.ready().then(resolve).catch(reject)
         }).catch(reject)
     })
@@ -48,6 +49,7 @@ export class SerializedDocumentPromise extends Promise<SerializedDocument> {
         super(fn);
     }
 }
+
 
 export class SerializedDocumentArrayPromise extends Promise<SerializedDocumentArray> {
     ready = (): Promise<SerializedDocumentArray> => new Promise(async (resolve, reject) => {
@@ -61,9 +63,10 @@ export class SerializedDocumentArrayPromise extends Promise<SerializedDocumentAr
     }
 }
 
-export class SerializedDocumentArray extends Array<SerializedDocument> {
+// TODO solve any
+export class SerializedDocumentArray extends Array<SerializedDocument<any>> {
     constructor(querySnapshot: QuerySnapshot, includesConfig: IncludeConfig | 'ALL' = {}) {
-        let docs: SerializedDocument[] = []
+        let docs: SerializedDocument<any>[] = []
         if (querySnapshot.docs) {
             docs = querySnapshot.docs.map(doc => {
                 return new SerializedDocument(doc, includesConfig)
@@ -107,24 +110,24 @@ export class SerializedDocumentArray extends Array<SerializedDocument> {
     JSONStringify() {return toJSON(this)}
 }
 
-export class SerializedDocument {
-    data: any
+export class SerializedDocument<T extends SerializedDocument<T>> {
+    data: T['data']
     ref: firebase.firestore.DocumentReference
-    included: Object = {}
+    included: T['included'] = {}
     promises: Object = {}
     _promisesArray: Promise<any>[] = []
-    _includedArray: SerializedDocument[] = []
+    _includedArray: SerializedDocument<T>[] = []
     snapshot: DocumentSnapshot
 
     constructor(documentSnapshot: DocumentSnapshot, includeConfig: IncludeConfig | 'ALL' = {}) {
-        this.data = documentSnapshot.data()
+        this.data = documentSnapshot.data();
         this.snapshot = documentSnapshot;
-        this.ref = documentSnapshot.ref
-        this.processIncludes(includeConfig)
+        this.ref = documentSnapshot.ref;
+        this.processIncludes(includeConfig);
         this.data = serializedDocumentTransformer(this).data;
     }
 
-    static createLocal = (ref: DocumentReference, data: any = {}, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocument => {
+    static createLocal = (ref: DocumentReference, data: any = {}, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocument<any> => {
         const serializedDocument = new SerializedDocument({ref, data: () => data} as DocumentSnapshot, includeConfig);
         serializedDocument.data = data;
         serializedDocument.ref = ref;
@@ -132,7 +135,7 @@ export class SerializedDocument {
         return serializedDocument;
     }
 
-    static fromDocumentReference = (ref: DocumentReference, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentPromise => {
+    static fromDocumentReference = (ref: DocumentReference, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentPromise<any> => {
         return new SerializedDocumentPromise((resolve: any, reject: any) => {
             getCachedDocumentSnapshotPromise(ref)
                 .then(documentSnapshot => resolve(new SerializedDocument(documentSnapshot, includeConfig)))
@@ -140,7 +143,7 @@ export class SerializedDocument {
         })
     }
 
-    static fromJSON = (obj: string, firestore: Firestore): SerializedDocument => fromJSON(obj, firestore)
+    static fromJSON = (obj: string, firestore: Firestore): SerializedDocument<any> => fromJSON(obj, firestore)
 
     static toJSON = (obj: any): string => toJSON(obj)
 
@@ -186,7 +189,7 @@ export class SerializedDocument {
     }
 
     includeReferenceArray = (path: string, documentReferenceArray: DocumentReference[], includeConfig = {}) => {
-        _.set(this.included, path, [])
+        _.set(this.included as object, path, [])
         _.set(this.promises, path, [])
         documentReferenceArray.forEach((documentReference: DocumentReference) => {
             const promise = new Promise((resolve, reject) => {
@@ -206,7 +209,7 @@ export class SerializedDocument {
         const promise = new Promise((resolve, reject) => {
             getCachedDocumentSnapshotPromise(documentReference).then(documentSnapshot => {
                 const includedSerializedDocument = serializedDocumentTransformer(new SerializedDocument(documentSnapshot, includeConfig))
-                _.set(this.included, path, includedSerializedDocument)
+                _.set(this.included as object, path, includedSerializedDocument)
                 this._includedArray.push(includedSerializedDocument);
                 resolve(includedSerializedDocument)
             }).catch(reject)
@@ -218,7 +221,7 @@ export class SerializedDocument {
     includeCollectionReferenceOrQuery = (path: string, collectionReferenceOrQuery: CollectionReference | Query, includeConfig = {}) => {
         const promise = new Promise(async (resolve, reject) => {
             SerializedDocumentArray.fromQuery(collectionReferenceOrQuery, includeConfig).then(serializedDocumentArray => {
-                _.set(this.included, path, serializedDocumentArray);
+                _.set(this.included as object, path, serializedDocumentArray);
                 resolve(serializedDocumentArray)
             }).catch(reject)
         });
@@ -252,7 +255,7 @@ export class SerializedDocument {
         Promise.all(this._promisesArray).then(() => {
             const allPromises: Promise<any>[] = []
 
-            this._includedArray.forEach((includedValue: SerializedDocument) => {
+            this._includedArray.forEach((includedValue: SerializedDocument<T>) => {
                 allPromises.push(includedValue.allPromisesRecursive())
             })
             Promise.all(allPromises).then(res => {
@@ -261,20 +264,20 @@ export class SerializedDocument {
         }).catch(reject)
     })
 
-    ready = (): Promise<SerializedDocument> => new Promise(async (resolve, reject) => {
+    ready = (): Promise<SerializedDocument<T>> => new Promise(async (resolve, reject) => {
         this.allPromisesRecursive().then(() => resolve(this)).catch(reject)
     })
 
     JSONStringify = () => toJSON(this)
 }
 
-function transformDates(serializedDocument: SerializedDocument) {
+function transformDates<T extends SerializedDocument<T>>(serializedDocument: SerializedDocument<T>) {
     serializedDocument.data = transformDatesHelper(serializedDocument.data);
     return serializedDocument;
 }
 
-function transformDatesHelper(data: { [key: string]: any }) {
-    if (data) Object.entries(data).forEach(([property, value]) => {
+function transformDatesHelper(data: any) {
+    if (data) Object.entries(data).forEach(([property, value]: [string, any]) => {
         if (Array.isArray(value)) { // Array
             value.forEach((arrayValue: any, index) => {
                 if (isPlainObject(arrayValue)) {
