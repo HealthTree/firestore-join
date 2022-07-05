@@ -127,15 +127,15 @@ export class SerializedDocument<T extends SerializedDocument<T>> {
         this.data = serializedDocumentTransformer(this).data;
     }
 
-    static createLocal = (ref: DocumentReference, data: any = {}, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocument<any> => {
-        const serializedDocument = new SerializedDocument({ref, data: () => data} as DocumentSnapshot, includeConfig);
+    static createLocal = <T extends SerializedDocument<T>>(ref: DocumentReference, data: any = {}, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocument<T> => {
+        const serializedDocument = new SerializedDocument({ref, data: () => data} as DocumentSnapshot, includeConfig) as SerializedDocument<T>;
         serializedDocument.data = data;
         serializedDocument.ref = ref;
         serializedDocument.data = serializedDocumentTransformer(serializedDocument).data;
         return serializedDocument;
     }
 
-    static fromDocumentReference = (ref: DocumentReference, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentPromise<any> => {
+    static fromDocumentReference = <T extends SerializedDocument<T>>(ref: DocumentReference, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentPromise<T> => {
         return new SerializedDocumentPromise((resolve: any, reject: any) => {
             getCachedDocumentSnapshotPromise(ref)
                 .then(documentSnapshot => resolve(new SerializedDocument(documentSnapshot, includeConfig)))
