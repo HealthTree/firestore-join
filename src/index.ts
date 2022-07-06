@@ -32,12 +32,6 @@ export interface JoinDate {
     value: string;
 }
 
-// TODO solve this <any>
-export interface SerializedDocumentNested {
-    [key: string]: SerializedDocument<any>;
-}
-
-// TODO solved ?
 export class SerializedDocumentPromise<T extends SerializedDocument<T>> extends Promise<SerializedDocument<T>> {
     ready = (): Promise<SerializedDocument<T>> => new Promise(async (resolve, reject) => {
         this.then((serializedDocument: SerializedDocument<T>) => {
@@ -50,10 +44,9 @@ export class SerializedDocumentPromise<T extends SerializedDocument<T>> extends 
     }
 }
 
-
-export class SerializedDocumentArrayPromise extends Promise<SerializedDocumentArray> {
-    ready = (): Promise<SerializedDocumentArray> => new Promise(async (resolve, reject) => {
-        this.then((serializedDocumentArray: SerializedDocumentArray) => {
+export class SerializedDocumentArrayPromise<T extends SerializedDocument<T>> extends Promise<SerializedDocumentArray<T>> {
+    ready = (): Promise<SerializedDocumentArray<T>> => new Promise(async (resolve, reject) => {
+        this.then((serializedDocumentArray: SerializedDocumentArray<T>) => {
             serializedDocumentArray.ready().then(resolve).catch(reject)
         }).catch(reject)
     })
@@ -63,8 +56,7 @@ export class SerializedDocumentArrayPromise extends Promise<SerializedDocumentAr
     }
 }
 
-// TODO solve any
-export class SerializedDocumentArray extends Array<SerializedDocument<any>> {
+export class SerializedDocumentArray<T extends SerializedDocument<T>> extends Array<SerializedDocument<T>> {
     constructor(querySnapshot: QuerySnapshot, includesConfig: IncludeConfig | 'ALL' = {}) {
         let docs: SerializedDocument<any>[] = []
         if (querySnapshot.docs) {
@@ -75,7 +67,7 @@ export class SerializedDocumentArray extends Array<SerializedDocument<any>> {
         super(...docs)
     }
 
-    static fromDocumentReferenceArray = (documentReferenceArray: [DocumentReference], includesConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentArrayPromise => {
+    static fromDocumentReferenceArray =<T extends SerializedDocument<T>> (documentReferenceArray: [DocumentReference], includesConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentArrayPromise<T> => {
         return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
             Promise.all(documentReferenceArray.map(documentReference => SerializedDocument.fromDocumentReference(documentReference, includesConfig))).then(serializedDocuments => {
                 resolve(Object.setPrototypeOf(serializedDocuments, SerializedDocumentArray.prototype))
@@ -83,7 +75,7 @@ export class SerializedDocumentArray extends Array<SerializedDocument<any>> {
         })
     }
 
-    static fromQuery = (collectionReferenceOrQuery: CollectionReference | Query, includesConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentArrayPromise => {
+    static fromQuery = <T extends SerializedDocument<T>>(collectionReferenceOrQuery: CollectionReference | Query, includesConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentArrayPromise<T> => {
         return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
             collectionReferenceOrQuery.get().then(querySnapshot => {
                 resolve(new SerializedDocumentArray(querySnapshot, includesConfig))
@@ -91,7 +83,7 @@ export class SerializedDocumentArray extends Array<SerializedDocument<any>> {
         });
     }
 
-    static fromJSON = (obj: string, firestore: Firestore): SerializedDocumentArray => fromJSON(obj, firestore)
+    static fromJSON = (obj: string, firestore: Firestore): SerializedDocumentArray<any> => fromJSON(obj, firestore)
 
     allPromises() {
         return Promise.all(this.map(doc => Promise.all(doc._promisesArray)))
@@ -101,7 +93,7 @@ export class SerializedDocumentArray extends Array<SerializedDocument<any>> {
         return Promise.all(this.map(doc => doc.allPromisesRecursive()))
     }
 
-    ready(): Promise<SerializedDocumentArray> {
+    ready(): Promise<SerializedDocumentArray<T>> {
         return new Promise(async (resolve, reject) => {
             this.allPromisesRecursive().then(() => resolve(this)).catch(reject)
         })
