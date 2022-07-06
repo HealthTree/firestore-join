@@ -1,12 +1,13 @@
 import 'core-js/features/promise'
-import firebase from 'firebase'
 import _ from 'lodash'
+import firebase from 'firebase/compat';
 import DocumentReference = firebase.firestore.DocumentReference
 import DocumentSnapshot = firebase.firestore.DocumentSnapshot
 import QuerySnapshot = firebase.firestore.QuerySnapshot
 import Query = firebase.firestore.Query;
 import CollectionReference = firebase.firestore.CollectionReference;
 import Firestore = firebase.firestore.Firestore;
+
 
 let cacheTimeout: number = 3000;
 
