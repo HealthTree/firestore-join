@@ -33,7 +33,9 @@ export interface JoinDate {
     value: string;
 }
 
-export class SerializedDocumentPromise<T extends SerializedDocument<T>> extends Promise<SerializedDocument<T>> {
+
+
+export class SerializedDocumentPromise<T extends SerializedInterface<T>> extends Promise<SerializedDocument<T>> {
     ready = (): Promise<SerializedDocument<T>> => new Promise(async (resolve, reject) => {
         this.then((serializedDocument: SerializedDocument<T>) => {
             serializedDocument.ready().then(resolve).catch(reject)
@@ -45,7 +47,7 @@ export class SerializedDocumentPromise<T extends SerializedDocument<T>> extends 
     }
 }
 
-export class SerializedDocumentArrayPromise<T extends SerializedDocument<T>> extends Promise<SerializedDocumentArray<T>> {
+export class SerializedDocumentArrayPromise<T extends SerializedInterface<T>> extends Promise<SerializedDocumentArray<T>> {
     ready = (): Promise<SerializedDocumentArray<T>> => new Promise(async (resolve, reject) => {
         this.then((serializedDocumentArray: SerializedDocumentArray<T>) => {
             serializedDocumentArray.ready().then(resolve).catch(reject)
@@ -57,7 +59,7 @@ export class SerializedDocumentArrayPromise<T extends SerializedDocument<T>> ext
     }
 }
 
-export class SerializedDocumentArray<T extends SerializedDocument<T>> extends Array<SerializedDocument<T>> {
+export class SerializedDocumentArray<T extends SerializedInterface<T>> extends Array<SerializedDocument<T>> {
     constructor(querySnapshot: QuerySnapshot, includesConfig: IncludeConfig | 'ALL' = {}) {
         let docs: SerializedDocument<any>[] = []
         if (querySnapshot.docs) {
@@ -68,7 +70,7 @@ export class SerializedDocumentArray<T extends SerializedDocument<T>> extends Ar
         super(...docs)
     }
 
-    static fromDocumentReferenceArray =<T extends SerializedDocument<T>> (documentReferenceArray: [DocumentReference], includesConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentArrayPromise<T> => {
+    static fromDocumentReferenceArray =<T extends SerializedInterface<T>> (documentReferenceArray: [DocumentReference], includesConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentArrayPromise<T> => {
         return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
             Promise.all(documentReferenceArray.map(documentReference => SerializedDocument.fromDocumentReference(documentReference, includesConfig))).then(serializedDocuments => {
                 resolve(Object.setPrototypeOf(serializedDocuments, SerializedDocumentArray.prototype))
@@ -76,7 +78,7 @@ export class SerializedDocumentArray<T extends SerializedDocument<T>> extends Ar
         })
     }
 
-    static fromQuery = <T extends SerializedDocument<T>>(collectionReferenceOrQuery: CollectionReference | Query, includesConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentArrayPromise<T> => {
+    static fromQuery = <T extends SerializedInterface<T>>(collectionReferenceOrQuery: CollectionReference | Query, includesConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentArrayPromise<T> => {
         return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
             collectionReferenceOrQuery.get().then(querySnapshot => {
                 resolve(new SerializedDocumentArray(querySnapshot, includesConfig))
@@ -103,7 +105,9 @@ export class SerializedDocumentArray<T extends SerializedDocument<T>> extends Ar
     JSONStringify() {return toJSON(this)}
 }
 
-export class SerializedDocument<T extends SerializedDocument<T>> {
+interface SerializedInterface<T> extends Partial<SerializedDocument<T>> {}
+
+export class SerializedDocument<T extends SerializedInterface<T>> {
     data: T['data']
     ref: firebase.firestore.DocumentReference
     included: T['included'] = {}
@@ -120,7 +124,7 @@ export class SerializedDocument<T extends SerializedDocument<T>> {
         this.data = serializedDocumentTransformer(this).data;
     }
 
-    static createLocal = <T extends SerializedDocument<T>>(ref: DocumentReference, data: any = {}, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocument<T> => {
+    static createLocal = <T extends SerializedInterface<T>>(ref: DocumentReference, data: any = {}, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocument<T> => {
         const serializedDocument = new SerializedDocument({ref, data: () => data} as DocumentSnapshot, includeConfig) as SerializedDocument<T>;
         serializedDocument.data = data;
         serializedDocument.ref = ref;
@@ -128,7 +132,7 @@ export class SerializedDocument<T extends SerializedDocument<T>> {
         return serializedDocument;
     }
 
-    static fromDocumentReference = <T extends SerializedDocument<T>>(ref: DocumentReference, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentPromise<T> => {
+    static fromDocumentReference = <T extends SerializedInterface<T>>(ref: DocumentReference, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentPromise<T> => {
         return new SerializedDocumentPromise((resolve: any, reject: any) => {
             getCachedDocumentSnapshotPromise(ref)
                 .then(documentSnapshot => resolve(new SerializedDocument(documentSnapshot, includeConfig)))
@@ -264,7 +268,7 @@ export class SerializedDocument<T extends SerializedDocument<T>> {
     JSONStringify = () => toJSON(this)
 }
 
-function transformDates<T extends SerializedDocument<T>>(serializedDocument: SerializedDocument<T>) {
+function transformDates<T extends SerializedInterface<T>>(serializedDocument: SerializedDocument<T>) {
     serializedDocument.data = transformDatesHelper(serializedDocument.data);
     return serializedDocument;
 }
