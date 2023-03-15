@@ -339,28 +339,36 @@ function convertJSDateToJoinDate(obj: Date) {
     }
 }
 
-function preprocessObjectToStringify(data: any) {
-    if (data) {
-        if (data instanceof SerializedDocument) {
-            data = _.pick(data, ['data', 'included', 'ref', 'snapshot'])
-            data.snapshot = {
-                ref: convertRefToJoinRef(data.ref),
-                id: data.snapshot.id,
-                exists: data.snapshot.exists
+function preprocessObjectToStringify(key: any, value: any) {
+    let returnVal: any;
+    if (value && key !== undefined) {
+        if (value instanceof SerializedDocument) {
+            let temp: any;
+            temp = _.pick(value, ['data', 'included', 'ref'])
+            temp.snapshot = {
+                ref: convertRefToJoinRef(value.ref),
+                id: value.snapshot.id,
+                exists: value.snapshot.exists
             }
-        }
-
-        if (isDocumentReference(data)) {
-            return convertRefToJoinRef(data)
-        } else if (isJSDate(data)){
-            return convertJSDateToJoinDate(data)
-        } else if ((typeof data === 'object')){
-            for (let key in data) {
-                data[key] = preprocessObjectToStringify(data[key])
-            }
+            returnVal = temp;
+        } else if (isDocumentReference(value)) {
+            returnVal = convertRefToJoinRef(value)
+        } else if (isJSDate(value)){
+            returnVal = convertJSDateToJoinDate(value)
+        } else {
+            returnVal = value
         }
     }
-    return data;
+    // sort json
+    if(returnVal instanceof Object && !(returnVal instanceof Array)) {
+        returnVal = Object.keys(returnVal)
+            .sort()
+            .reduce((sorted: any, key) => {
+                sorted[key] = returnVal[key];
+                return sorted
+            }, {})
+    }
+    return returnVal;
 }
 
 function convertJoinRefToRef(JoinRef: JoinRef, firestore: Firestore) {
@@ -376,9 +384,7 @@ function convertJoinDateToJSDate(joinDate: JoinDate) {
 }
 
 export function toJSON(data: { [key: string]: any }) {
-    const copy = _.cloneDeep(data);
-    const toStringify = preprocessObjectToStringify(copy);
-    return JSON.stringify(toStringify);
+    return JSON.stringify(data, preprocessObjectToStringify);
 }
 
 function isJoinRef(obj: any) {
