@@ -353,9 +353,14 @@ function preprocessObjectToStringify(key: any, value: any) {
             returnVal = temp;
         } else if (isDocumentReference(value)) {
             returnVal = convertRefToJoinRef(value)
-        } else if (isJSDate(value)){
-            returnVal = convertJSDateToJoinDate(value)
-        } else {
+        }  else {
+            if (typeof(value) === 'object') {
+                for (const k in value) {
+                    if (isJSDate(value[k])){
+                        value[k] = convertJSDateToJoinDate(value[k])
+                    }
+                }
+            }
             returnVal = value
         }
     }
@@ -384,7 +389,8 @@ function convertJoinDateToJSDate(joinDate: JoinDate) {
 }
 
 export function toJSON(data: { [key: string]: any }) {
-    return JSON.stringify(data, preprocessObjectToStringify);
+    const json = JSON.stringify(data, preprocessObjectToStringify);
+    return json;
 }
 
 function isJoinRef(obj: any) {
