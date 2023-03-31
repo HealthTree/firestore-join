@@ -389,7 +389,8 @@ function convertJoinDateToJSDate(joinDate: JoinDate) {
 }
 
 export function toJSON(data: { [key: string]: any }) {
-    const json = JSON.stringify(data, preprocessObjectToStringify);
+    const copy = _.cloneDeep(data);
+    const json = JSON.stringify(copy, preprocessObjectToStringify);
     return json;
 }
 
