@@ -416,7 +416,7 @@ function isJoinDate(obj: any) {
     return false;
 }
 
-function processParsedJoinJSON(data: any, firestore: Firestore) {
+export function processParsedJoinJSON(data: any, firestore: Firestore) {
     if (data) {
         if(isJoinRef(data)) {
             return convertJoinRefToRef(data, firestore)
