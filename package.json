@@ -3,7 +3,7 @@
     "type": "git",
     "url": "https://github.com/HealthTree/firestore-join"
   },
-  "version": "0.5.17",
+  "version": "0.5.18",
   "license": "MIT",
   "main": "dist/index.js",
   "typings": "dist/index.d.ts",
