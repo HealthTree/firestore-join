@@ -341,7 +341,7 @@ function convertJSDateToJoinDate(obj: Date) {
 
 function preprocessObjectToStringify(key: any, value: any) {
     let returnVal: any;
-    if (value && key !== undefined) {
+    if (value !== undefined && key !== undefined) {
         if (value instanceof SerializedDocument) {
             let temp: any;
             temp = _.pick(value, ['data', 'included', 'ref'])
