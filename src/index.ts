@@ -1,5 +1,5 @@
 import 'core-js/features/promise';
-import * as _ from 'lodash-es';
+import _ from 'lodash';
 import firebase from 'firebase/compat';
 import DocumentReference = firebase.firestore.DocumentReference;
 import DocumentSnapshot = firebase.firestore.DocumentSnapshot;

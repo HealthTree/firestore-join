@@ -58,10 +58,8 @@
     "typescript": "^4.3.5"
   },
   "dependencies": {
-    "@types/lodash-es": "^4.17.12",
     "core-js": "^3.6.5",
-    "lodash": "^4.17.21",
-    "lodash-es": "^4.17.21"
+    "lodash": "^4.17.21"
   },
   "description": "Join firestore references automatically.",
   "directories": {
