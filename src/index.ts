@@ -1,15 +1,17 @@
-import 'core-js/features/promise'
-import _ from 'lodash'
+import 'core-js/features/promise';
+import * as _ from 'lodash-es';
 import firebase from 'firebase/compat';
-import DocumentReference = firebase.firestore.DocumentReference
-import DocumentSnapshot = firebase.firestore.DocumentSnapshot
-import QuerySnapshot = firebase.firestore.QuerySnapshot
+import DocumentReference = firebase.firestore.DocumentReference;
+import DocumentSnapshot = firebase.firestore.DocumentSnapshot;
+import QuerySnapshot = firebase.firestore.QuerySnapshot;
 import Query = firebase.firestore.Query;
 import CollectionReference = firebase.firestore.CollectionReference;
 import Firestore = firebase.firestore.Firestore;
 
 
 let cacheTimeout: number = 3000;
+
+const FIREBASE_QUERY_DISJUNCTION_LIMIT = 29;
 
 let documentReferencePromiseMapCache: { [key: string]: CachedDocumentSnapshotPromise } = {};
 
@@ -33,7 +35,25 @@ export interface JoinDate {
     value: string;
 }
 
-
+interface QueryHiddenProps {
+    _delegate: {
+        _query: {
+            collectionGroup: string,
+            filters: any[],
+            endAt: any,
+            limit: number,
+            path: { segments: string[] },
+            startAt: any,
+            explicitOrderBy?: {
+                field: {
+                    len: number,
+                    offset: number,
+                    segments: string[],
+                },
+                dir: any  }[]
+        }
+    }
+}
 
 export class SerializedDocumentPromise<T extends SerializedInterface<T>> extends Promise<SerializedDocument<T>> {
     ready = (): Promise<SerializedDocument<T>> => new Promise(async (resolve, reject) => {
@@ -50,7 +70,7 @@ export class SerializedDocumentPromise<T extends SerializedInterface<T>> extends
 export class SerializedDocumentArrayPromise<T extends SerializedInterface<T>> extends Promise<SerializedDocumentArray<T>> {
     ready = (): Promise<SerializedDocumentArray<T>> => new Promise(async (resolve, reject) => {
         this.then((serializedDocumentArray: SerializedDocumentArray<T>) => {
-            serializedDocumentArray.ready().then(resolve).catch(reject)
+            serializedDocumentArray?.ready().then(resolve).catch(reject)
         }).catch(reject)
     })
 
@@ -78,12 +98,65 @@ export class SerializedDocumentArray<T extends SerializedInterface<T>> extends A
         })
     }
 
-    static fromQuery = <T extends SerializedInterface<T>>(collectionReferenceOrQuery: CollectionReference | Query, includesConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentArrayPromise<T> => {
-        return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
-            collectionReferenceOrQuery.get().then(querySnapshot => {
-                resolve(new SerializedDocumentArray(querySnapshot, includesConfig))
-            }).catch(reject);
-        });
+    static fromQuery = <T extends SerializedInterface<T>>(
+        collectionReferenceOrQuery: (CollectionReference | Query) | ((CollectionReference | Query) & QueryHiddenProps),
+        includesConfig: IncludeConfig | 'ALL' = {}
+    ): SerializedDocumentArrayPromise<T> => {
+        const _query = (collectionReferenceOrQuery as (CollectionReference | Query) & QueryHiddenProps)._delegate._query;
+
+        if (_query.filters?.some((filter: any) =>
+            filter.op === 'array-contains-any' &&
+            filter.value?.arrayValue?.values?.length > FIREBASE_QUERY_DISJUNCTION_LIMIT)) {
+
+            const filterIndex = _query.filters?.findIndex((filter: any) => filter.op === 'array-contains-any' && filter.value?.arrayValue?.values?.length > FIREBASE_QUERY_DISJUNCTION_LIMIT);
+            if (filterIndex !== -1) {
+                const originalFilter = _query.filters[filterIndex];
+                const chunkedValues = _.chunk(originalFilter.value.arrayValue.values, 10);
+                const originalQuery = collectionReferenceOrQuery as (CollectionReference | Query) & QueryHiddenProps;
+
+                const promises = chunkedValues.map((chunk: any) => {
+                    const newQuery = originalQuery;
+                    newQuery._delegate._query.filters[filterIndex].value.arrayValue.values = chunk;
+                    return newQuery.get();
+                });
+
+                return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
+                    Promise.all(promises).then((querySnapshots) => {
+                        const mergedDocsMap: { [key: string]: DocumentSnapshot } = {};
+                        querySnapshots.forEach(querySnapshot => {
+                            querySnapshot.docs.forEach(doc => {
+                                mergedDocsMap[doc.id] = doc;
+                            })
+                        });
+                        let mergedDocs = Object.values(mergedDocsMap);
+
+                        if (originalQuery._delegate._query.explicitOrderBy) {
+                            let orders = originalQuery._delegate._query.explicitOrderBy;
+                            let fields = orders.map(order => ['data'].concat(order.field.segments));
+                            let directions = orders.map(order => order.dir);
+                            mergedDocs = _.orderBy(mergedDocs, fields, directions) as unknown as DocumentSnapshot[];
+                        }
+                        if (originalQuery._delegate._query.limit) {
+                            mergedDocs = _.take(mergedDocs, originalQuery._delegate._query.limit);
+                        }
+
+                        const mergedQuerySnapshot = {docs: mergedDocs} as QuerySnapshot;
+
+                            resolve(new SerializedDocumentArray(mergedQuerySnapshot, includesConfig));
+                    }).catch(reject);
+                });
+            } else {
+                console.warn('array-contains-any filter not found');
+                return [] as unknown as SerializedDocumentArrayPromise<T>;
+            }
+
+        } else {
+            return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
+                collectionReferenceOrQuery.get().then(querySnapshot => {
+                    resolve(new SerializedDocumentArray(querySnapshot, includesConfig))
+                }).catch(reject);
+            });
+        }
     }
 
     static fromJSON = (obj: string, firestore: Firestore): SerializedDocumentArray<any> => fromJSON(obj, firestore)
@@ -215,7 +288,7 @@ export class SerializedDocument<T extends SerializedInterface<T>> {
         this._promisesArray.push(promise);
     }
 
-    includeCollectionReferenceOrQuery = (path: string, collectionReferenceOrQuery: CollectionReference | Query, includeConfig = {}) => {
+    includeCollectionReferenceOrQuery = (path: string, collectionReferenceOrQuery: (CollectionReference | Query) & {_delegate: {_query: any}, filters: any[]} , includeConfig = {}) => {
         const promise = new Promise(async (resolve, reject) => {
             SerializedDocumentArray.fromQuery(collectionReferenceOrQuery, includeConfig).then(serializedDocumentArray => {
                 _.set(this.included as object, path, serializedDocumentArray);
@@ -390,17 +463,14 @@ function convertJoinDateToJSDate(joinDate: JoinDate) {
 
 export function toJSON(data: { [key: string]: any }) {
     const copy = _.cloneDeep(data);
-    const json = JSON.stringify(copy, preprocessObjectToStringify);
-    return json;
+    return JSON.stringify(copy, preprocessObjectToStringify);
 }
 
 function isJoinRef(obj: any) {
     if (typeof obj !== 'object') return false;
     const keys = Object.keys(obj);
-    if (keys.length === 2 &&  obj._type === 'DocumentReference') {
-        return true;
-    }
-    return false;
+    return keys.length === 2 && obj._type === 'DocumentReference';
+
 }
 
 function isJSDate(obj: any) {
@@ -410,10 +480,8 @@ function isJSDate(obj: any) {
 function isJoinDate(obj: any) {
     if (typeof obj !== 'object') return false;
     const keys = Object.keys(obj);
-    if (keys.length === 2 &&  obj._type === 'Date') {
-        return true;
-    }
-    return false;
+    return keys.length === 2 && obj._type === 'Date';
+
 }
 
 export function processParsedJoinJSON(data: any, firestore: Firestore) {
