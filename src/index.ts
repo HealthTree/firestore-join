@@ -108,6 +108,7 @@ export class SerializedDocumentArray<T extends SerializedInterface<T>> extends A
         includesConfig: IncludeConfig | 'ALL' = {}, firestore: Firestore = firestoreInstance
     ): SerializedDocumentArrayPromise<T> => {
         const _query = (collectionReferenceOrQuery as (CollectionReference | Query) & QueryHiddenProps)._delegate._query;
+        // console.log(' --- checking query', _query.path.segments.join('/') ,collectionReferenceOrQuery);
         if (_query.filters?.some((filter: any) =>
             filter.op === 'array-contains-any'
             && filter.value?.arrayValue?.values?.length > FIREBASE_QUERY_DISJUNCTION_LIMIT)
@@ -123,7 +124,7 @@ export class SerializedDocumentArray<T extends SerializedInterface<T>> extends A
                 const promises = chunkedValues.map(async (chunk: any) => {
                     const newQuery = _.cloneDeep(originalQuery);
                     newQuery._delegate._query.filters[filterIndex].value = {arrayValue: {values: chunk}}; // chunk;
-                    const finalQuery = constructNewQueryFromQuery(newQuery, firestore);
+                    const finalQuery = await constructNewQueryFromQuery(newQuery, firestore);
                     try {
                         return finalQuery.get();
                     } catch (e) {
@@ -422,7 +423,7 @@ const deserializeValue = (value: any) => {
     }
 };
 
-function constructNewQueryFromQuery(originalQuery: Query & QueryHiddenProps, firestore: Firestore): Query {
+async function constructNewQueryFromQuery(originalQuery: Query & QueryHiddenProps, firestore: Firestore): Promise<Query> {
     const originalQueryProps = (originalQuery as QueryHiddenProps)._delegate._query;
     // Initialize new query with the same collection reference
     let newQuery: firebase.firestore.Query = firestore.collection(originalQueryProps.path.segments.join('/'));
@@ -434,21 +435,23 @@ function constructNewQueryFromQuery(originalQuery: Query & QueryHiddenProps, fir
             newQuery = newQuery.where(field, filter.op, value);
         });
     }
-    if (originalQueryProps.endAt) {
-        newQuery = newQuery.endAt(originalQueryProps.endAt);
 
-    }
-    if (originalQueryProps.limit) {
-        newQuery = newQuery.limit(originalQueryProps.limit);
-    }
-    if (originalQueryProps.startAt) {
-        newQuery = newQuery.startAt(originalQueryProps.startAt);
-    }
     if (originalQueryProps.explicitOrderBy && originalQueryProps.explicitOrderBy?.length > 0) {
         originalQueryProps.explicitOrderBy.forEach(order => {
             newQuery = newQuery.orderBy(order.field.segments.join('.'), order.dir);
         });
     }
+
+    if (originalQueryProps.startAt?.position?.length > 0) {
+        (newQuery as Query & QueryHiddenProps)._delegate._query.startAt = _.cloneDeep(originalQueryProps.startAt);
+    }
+    if (originalQueryProps.endAt) {
+        (newQuery as Query & QueryHiddenProps)._delegate._query.endAt = _.cloneDeep(originalQueryProps.endAt);
+    }
+    if (originalQueryProps.limit) {
+        newQuery = newQuery.limit(originalQueryProps.limit);
+    }
+    // console.log('final New Query', newQuery);
     return newQuery;
 }
 
