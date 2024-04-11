@@ -116,15 +116,17 @@ export class SerializedDocumentArray<T extends SerializedInterface<T>> extends A
 
             const filterIndex = _query.filters?.findIndex((filter: any) => filter.op === 'array-contains-any');
             if (filterIndex !== -1) {
-                const originalFilter = _query.filters[filterIndex];
-                let valuesToChunk = originalFilter.value.arrayValue.values;
+                let valuesToChunk = _query.filters[filterIndex].value.arrayValue.values;
                 const chunkedValues = _.chunk(valuesToChunk, FIREBASE_QUERY_DISJUNCTION_LIMIT);
                 const originalQuery = collectionReferenceOrQuery as (CollectionReference | Query) & QueryHiddenProps;
 
-                const promises = chunkedValues.map(async (chunk: any) => {
+                const newQueries =  chunkedValues.map( (chunk: any) => {
                     const newQuery = _.cloneDeep(originalQuery);
-                    newQuery._delegate._query.filters[filterIndex].value = {arrayValue: {values: chunk}}; // chunk;
-                    const finalQuery = await constructNewQueryFromQuery(newQuery, firestore);
+                    newQuery._delegate._query.filters[filterIndex].value = {arrayValue: {values: chunk}};
+                    return constructNewQueryFromQuery(newQuery, firestore);
+                });
+
+                const promises = newQueries.map(async (finalQuery: any) => {
                     try {
                         return finalQuery.get();
                     } catch (e) {
@@ -423,7 +425,7 @@ const deserializeValue = (value: any) => {
     }
 };
 
-async function constructNewQueryFromQuery(originalQuery: Query & QueryHiddenProps, firestore: Firestore): Promise<Query> {
+ function constructNewQueryFromQuery(originalQuery: Query & QueryHiddenProps, firestore: Firestore): Query {
     const originalQueryProps = (originalQuery as QueryHiddenProps)._delegate._query;
     // Initialize new query with the same collection reference
     let newQuery: firebase.firestore.Query = firestore.collection(originalQueryProps.path.segments.join('/'));
@@ -451,7 +453,6 @@ async function constructNewQueryFromQuery(originalQuery: Query & QueryHiddenProp
     if (originalQueryProps.limit) {
         newQuery = newQuery.limit(originalQueryProps.limit);
     }
-    // console.log('final New Query', newQuery);
     return newQuery;
 }
 
