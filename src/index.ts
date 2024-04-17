@@ -9,9 +9,8 @@ import Query = firebase.firestore.Query;
 import CollectionReference = firebase.firestore.CollectionReference;
 import Firestore = firebase.firestore.Firestore;
 
-let cacheTimeout: number = 3000;
 
-const FIREBASE_QUERY_DISJUNCTION_LIMIT = 30;
+let cacheTimeout: number = 3000;
 
 let documentReferencePromiseMapCache: { [key: string]: CachedDocumentSnapshotPromise } = {};
 
@@ -35,31 +34,8 @@ export interface JoinDate {
     value: string;
 }
 
-interface QueryHiddenProps {
-    _delegate: {
-        _query: {
-            collectionGroup: string,
-            filters: any[],
-            endAt: any,
-            limit: number,
-            path: { segments: string[] },
-            startAt: any,
-            explicitOrderBy?: {
-                field: {
-                    len: number,
-                    offset: number,
-                    segments: string[],
-                },
-                dir: any  }[]
-        }
-    }
-}
 
-let firestoreInstance: Firestore;
 
-export function setFirestoreInstance(firestore: Firestore) {
-    firestoreInstance = firestore;
-}
 export class SerializedDocumentPromise<T extends SerializedInterface<T>> extends Promise<SerializedDocument<T>> {
     ready = (): Promise<SerializedDocument<T>> => new Promise(async (resolve, reject) => {
         this.then((serializedDocument: SerializedDocument<T>) => {
@@ -75,7 +51,7 @@ export class SerializedDocumentPromise<T extends SerializedInterface<T>> extends
 export class SerializedDocumentArrayPromise<T extends SerializedInterface<T>> extends Promise<SerializedDocumentArray<T>> {
     ready = (): Promise<SerializedDocumentArray<T>> => new Promise(async (resolve, reject) => {
         this.then((serializedDocumentArray: SerializedDocumentArray<T>) => {
-            serializedDocumentArray?.ready().then(resolve).catch(reject)
+            serializedDocumentArray.ready().then(resolve).catch(reject)
         }).catch(reject)
     })
 
@@ -103,75 +79,12 @@ export class SerializedDocumentArray<T extends SerializedInterface<T>> extends A
         })
     }
 
-    static fromQuery = <T extends SerializedInterface<T>>(
-        collectionReferenceOrQuery: (CollectionReference | Query) | ((CollectionReference | Query) & QueryHiddenProps),
-        includesConfig: IncludeConfig | 'ALL' = {}, firestore: Firestore = firestoreInstance
-    ): SerializedDocumentArrayPromise<T> => {
-        const _query = (collectionReferenceOrQuery as (CollectionReference | Query) & QueryHiddenProps)._delegate._query;
-        // console.log(' --- checking query', _query.path.segments.join('/') ,collectionReferenceOrQuery);
-        if (_query.filters?.some((filter: any) =>
-            filter.op === 'array-contains-any'
-            && filter.value?.arrayValue?.values?.length > FIREBASE_QUERY_DISJUNCTION_LIMIT)
-        ) {
-
-            const filterIndex = _query.filters?.findIndex((filter: any) => filter.op === 'array-contains-any');
-            if (filterIndex !== -1) {
-                let valuesToChunk = _query.filters[filterIndex].value.arrayValue.values;
-                const chunkedValues = _.chunk(valuesToChunk, FIREBASE_QUERY_DISJUNCTION_LIMIT);
-                const originalQuery = collectionReferenceOrQuery as (CollectionReference | Query) & QueryHiddenProps;
-
-                const newQueries =  chunkedValues.map( (chunk: any) => {
-                    const newQuery = _.cloneDeep(originalQuery);
-                    newQuery._delegate._query.filters[filterIndex].value = {arrayValue: {values: chunk}};
-                    return constructNewQueryFromQuery(newQuery, firestore);
-                });
-
-                const promises = newQueries.map(async (finalQuery: any) => {
-                    try {
-                        return finalQuery.get();
-                    } catch (e) {
-                        console.error('Error splitting query', e);
-                        return {docs: []} as unknown as QuerySnapshot;
-                    }
-                });
-
-                return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
-                    Promise.all(promises).then((querySnapshots) => {
-                        const mergedDocsMap: { [key: string]: DocumentSnapshot } = {};
-                        querySnapshots.forEach(querySnapshot => {
-                            querySnapshot.docs.forEach((doc: DocumentSnapshot<firebase.firestore.DocumentData>) => {
-                                mergedDocsMap[doc.id] = doc;
-                            })
-                        });
-                        let mergedDocs = Object.values(mergedDocsMap);
-
-                        if (originalQuery._delegate._query.explicitOrderBy) {
-                            let orders = originalQuery._delegate._query.explicitOrderBy;
-                            let fields = orders.map(order => ['data'].concat(order.field.segments));
-                            let directions = orders.map(order => order.dir);
-                            mergedDocs = _.orderBy(mergedDocs, fields, directions) as unknown as DocumentSnapshot[];
-                        }
-                        if (originalQuery._delegate._query.limit) {
-                            mergedDocs = _.take(mergedDocs, originalQuery._delegate._query.limit);
-                        }
-
-                        const mergedQuerySnapshot = {docs: mergedDocs} as QuerySnapshot;
-
-                            resolve(new SerializedDocumentArray(mergedQuerySnapshot, includesConfig));
-                    }).catch(reject);
-                });
-            } else {
-                console.warn('array-contains-any filter not found');
-                return [] as unknown as SerializedDocumentArrayPromise<T>;
-            }
-
-        } else {
-            return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
-                collectionReferenceOrQuery.get().then(querySnapshot => {
-                    resolve(new SerializedDocumentArray(querySnapshot, includesConfig))
-                }).catch(reject);
-            });
-        }
+    static fromQuery = <T extends SerializedInterface<T>>(collectionReferenceOrQuery: CollectionReference | Query, includesConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentArrayPromise<T> => {
+        return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
+            collectionReferenceOrQuery.get().then(querySnapshot => {
+                resolve(new SerializedDocumentArray(querySnapshot, includesConfig))
+            }).catch(reject);
+        });
     }
 
     static fromJSON = (obj: string, firestore: Firestore): SerializedDocumentArray<any> => fromJSON(obj, firestore)
@@ -303,7 +216,7 @@ export class SerializedDocument<T extends SerializedInterface<T>> {
         this._promisesArray.push(promise);
     }
 
-    includeCollectionReferenceOrQuery = (path: string, collectionReferenceOrQuery: (CollectionReference | Query) & {_delegate: {_query: any}, filters: any[]} , includeConfig = {}) => {
+    includeCollectionReferenceOrQuery = (path: string, collectionReferenceOrQuery: CollectionReference | Query, includeConfig = {}) => {
         const promise = new Promise(async (resolve, reject) => {
             SerializedDocumentArray.fromQuery(collectionReferenceOrQuery, includeConfig).then(serializedDocumentArray => {
                 _.set(this.included as object, path, serializedDocumentArray);
@@ -395,67 +308,6 @@ function isCollectionReferenceOrQuery(value: any) {
     return typeof value?.where === 'function' && typeof value?.get === 'function';
 }
 
-// Convert inner firestore v8 filter values into JS values (compatible with modular v9)
-const deserializeValue = (value: any) => {
-    if (value.hasOwnProperty('stringValue')) {
-        return value.stringValue;
-    } else if (value.hasOwnProperty('doubleValue')) {
-        return parseFloat(value.doubleValue);
-    } else if (value.hasOwnProperty('integerValue')) {
-        return parseInt(value.integerValue);
-    } else if (value.hasOwnProperty('booleanValue')) {
-        return value.booleanValue;
-    } else if (value.hasOwnProperty('referenceValue')) {
-        return firestoreInstance.doc(
-            value.referenceValue.replace(
-                `projects/${(firestoreInstance as any)._databaseId.projectId}/databases/${
-                    (firestoreInstance as any)._databaseId.database
-                }/documents`,
-                ''
-            )
-        );
-    } else if (value.hasOwnProperty('timestampValue')) {
-        return new Date(value.timestampValue);
-    } else if (value.hasOwnProperty('nullValue')) {
-        return null;
-    } else if (value.hasOwnProperty('arrayValue')) {
-        return value.arrayValue.values.map(deserializeValue);
-    } else {
-        console.error('Unknown value type', value);
-    }
-};
-
- function constructNewQueryFromQuery(originalQuery: Query & QueryHiddenProps, firestore: Firestore): Query {
-    const originalQueryProps = (originalQuery as QueryHiddenProps)._delegate._query;
-    // Initialize new query with the same collection reference
-    let newQuery: firebase.firestore.Query = firestore.collection(originalQueryProps.path.segments.join('/'));
-    // Apply properties from the original query to the new query
-    if (originalQueryProps.filters) {
-        originalQueryProps.filters.forEach(filter => {
-            let field = filter.field.segments.join('.');
-            let value = deserializeValue(filter.value);
-            newQuery = newQuery.where(field, filter.op, value);
-        });
-    }
-
-    if (originalQueryProps.explicitOrderBy && originalQueryProps.explicitOrderBy?.length > 0) {
-        originalQueryProps.explicitOrderBy.forEach(order => {
-            newQuery = newQuery.orderBy(order.field.segments.join('.'), order.dir);
-        });
-    }
-
-    if (originalQueryProps.startAt?.position?.length > 0) {
-        (newQuery as Query & QueryHiddenProps)._delegate._query.startAt = _.cloneDeep(originalQueryProps.startAt);
-    }
-    if (originalQueryProps.endAt) {
-        (newQuery as Query & QueryHiddenProps)._delegate._query.endAt = _.cloneDeep(originalQueryProps.endAt);
-    }
-    if (originalQueryProps.limit) {
-        newQuery = newQuery.limit(originalQueryProps.limit);
-    }
-    return newQuery;
-}
-
 export function setCacheTimeout(milliseconds: number) {
     cacheTimeout = milliseconds;
 }
@@ -534,19 +386,22 @@ function convertJoinRefToRef(JoinRef: JoinRef, firestore: Firestore) {
 }
 
 function convertJoinDateToJSDate(joinDate: JoinDate) {
-   return new Date(joinDate.value);
+    return new Date(joinDate.value);
 }
 
 export function toJSON(data: { [key: string]: any }) {
     const copy = _.cloneDeep(data);
-    return JSON.stringify(copy, preprocessObjectToStringify);
+    const json = JSON.stringify(copy, preprocessObjectToStringify);
+    return json;
 }
 
 function isJoinRef(obj: any) {
     if (typeof obj !== 'object') return false;
     const keys = Object.keys(obj);
-    return keys.length === 2 && obj._type === 'DocumentReference';
-
+    if (keys.length === 2 &&  obj._type === 'DocumentReference') {
+        return true;
+    }
+    return false;
 }
 
 function isJSDate(obj: any) {
@@ -556,8 +411,10 @@ function isJSDate(obj: any) {
 function isJoinDate(obj: any) {
     if (typeof obj !== 'object') return false;
     const keys = Object.keys(obj);
-    return keys.length === 2 && obj._type === 'Date';
-
+    if (keys.length === 2 &&  obj._type === 'Date') {
+        return true;
+    }
+    return false;
 }
 
 export function processParsedJoinJSON(data: any, firestore: Firestore) {
@@ -576,6 +433,6 @@ export function processParsedJoinJSON(data: any, firestore: Firestore) {
 }
 
 export function fromJSON(data: string, firestore: Firestore) {
-   const obj = JSON.parse(data);
-   return processParsedJoinJSON(obj, firestore);
+    const obj = JSON.parse(data);
+    return processParsedJoinJSON(obj, firestore);
 }
