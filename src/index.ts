@@ -12,6 +12,8 @@ import Firestore = firebase.firestore.Firestore;
 let cacheTimeout: number = 3000;
 
 const FIREBASE_QUERY_DISJUNCTION_LIMIT = 30;
+const splittedQueriesQueue: { query: any; lastQueriedDocs: any[] }[] = [];
+const MAX_QUEUE_SIZE = 5;
 
 let documentReferencePromiseMapCache: { [key: string]: CachedDocumentSnapshotPromise } = {};
 
@@ -108,7 +110,7 @@ export class SerializedDocumentArray<T extends SerializedInterface<T>> extends A
         includesConfig: IncludeConfig | 'ALL' = {}, firestore: Firestore = firestoreInstance
     ): SerializedDocumentArrayPromise<T> => {
         const _query = (collectionReferenceOrQuery as (CollectionReference | Query) & QueryHiddenProps)._delegate._query;
-        // console.log(' --- checking query', _query.path.segments.join('/') ,collectionReferenceOrQuery);
+        // console.log(' --- checking query', _query.path.segments.join('/') ,_query);
         if (_query.filters?.some((filter: any) =>
             filter.op === 'array-contains-any'
             && filter.value?.arrayValue?.values?.length > FIREBASE_QUERY_DISJUNCTION_LIMIT)
@@ -120,13 +122,13 @@ export class SerializedDocumentArray<T extends SerializedInterface<T>> extends A
                 const chunkedValues = _.chunk(valuesToChunk, FIREBASE_QUERY_DISJUNCTION_LIMIT);
                 const originalQuery = collectionReferenceOrQuery as (CollectionReference | Query) & QueryHiddenProps;
 
-                const newQueries =  chunkedValues.map( (chunk: any) => {
+                const newQueries =  chunkedValues.map( (chunk: any, index: number) => {
                     const newQuery = _.cloneDeep(originalQuery);
                     newQuery._delegate._query.filters[filterIndex].value = {arrayValue: {values: chunk}};
-                    return constructNewQueryFromQuery(newQuery, firestore);
+                    return constructNewQueryFromQuery(newQuery, firestore, index);
                 });
 
-                const promises = newQueries.map(async (finalQuery: any) => {
+                const querySnapshotsPromises = newQueries.map(async (finalQuery) => {
                     try {
                         return finalQuery.get();
                     } catch (e) {
@@ -136,28 +138,92 @@ export class SerializedDocumentArray<T extends SerializedInterface<T>> extends A
                 });
 
                 return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
-                    Promise.all(promises).then((querySnapshots) => {
-                        const mergedDocsMap: { [key: string]: DocumentSnapshot } = {};
-                        querySnapshots.forEach(querySnapshot => {
-                            querySnapshot.docs.forEach((doc: DocumentSnapshot<firebase.firestore.DocumentData>) => {
-                                mergedDocsMap[doc.id] = doc;
-                            })
-                        });
-                        let mergedDocs = Object.values(mergedDocsMap);
+                    const querySnapshots = await Promise.all(querySnapshotsPromises);
+                    const promises = querySnapshots.map(async (querySnapshot) => {
+                        return new SerializedDocumentArray(querySnapshot, includesConfig);
+                    });
+                    Promise.all(promises).then((serializedDocumentArrays) => {
 
-                        if (originalQuery._delegate._query.explicitOrderBy) {
-                            let orders = originalQuery._delegate._query.explicitOrderBy;
-                            let fields = orders.map(order => ['data'].concat(order.field.segments));
-                            let directions = orders.map(order => order.dir);
-                            mergedDocs = _.orderBy(mergedDocs, fields, directions) as unknown as DocumentSnapshot[];
+                        const mergedDocsOrder: string[] = [];
+                        const mergedDocsMap: { [key: string]: SerializedDocument<any> } = {};
+
+                        serializedDocumentArrays.forEach((array, arrayIndex) => {
+                            // console.log('got in this split array' ,arrayIndex , array.length, array.map((doc: any) => ({ id: doc.ref?.id, title: doc?.data?.title, publishedAt: doc?.data?.publishedAt }) ));
+                            array.forEach((doc, docIndex) => {
+                                if (!mergedDocsMap.hasOwnProperty(doc.ref.id)) {
+                                    mergedDocsMap[doc.ref.id] = doc;
+                                    mergedDocsOrder.push(`${arrayIndex}_${docIndex}_${doc.ref.id}`);
+                                }
+                            });
+                        });
+                        mergedDocsOrder.sort();
+                        let mergedDocs = mergedDocsOrder.map(key => mergedDocsMap[key.split('_')[2]]);
+                        // console.log('mergedDocs', mergedDocs.length, mergedDocs.map((doc) => ({ id: doc.ref?.id, publishedAt: doc.data?.publishedAt, title: doc.data?.title }) ));
+
+                        if (mergedDocs?.length && originalQuery._delegate._query.explicitOrderBy?.length) {
+
+                                let orders = originalQuery._delegate._query.explicitOrderBy;
+                                let fields = orders.map(order => 'data.' + order.field.segments.join('.'));
+                                let directions = orders.map(order => order.dir);
+                                // mergedDocs = _.orderBy(mergedDocs, fields, directions);
+                                // Custom sorting function to preserve original order when values are the same
+                            const recordsToSort = mergedDocs.map((doc) => ({ ref: doc.ref, data: doc.data }));
+                            const customSortFunction = (a: any, b: any) => {
+                                const aIndex = recordsToSort.findIndex(doc => doc.ref.id === a.ref.id);
+                                const bIndex = recordsToSort.findIndex(doc => doc.ref.id === b.ref.id);
+                                for (let i = 0; i < fields.length; i++) {
+                                    const aValue = _.get(a, fields[i]);
+                                    const bValue = _.get(b, fields[i]);
+
+                                    if (!_.isEqual(aValue, bValue)) {
+                                            // Values are different, sort based on current field
+                                            return directions[i] === 'asc' ? (aValue > bValue ? 1 : -1) : (aValue < bValue ? 1 : -1);
+                                    }
+                                }
+                                return aIndex - bIndex;
+                            };
+
+                            mergedDocs.sort(customSortFunction);
+                            // console.log('mergedDocs after sorting', mergedDocs.length, mergedDocs.map((doc) => ({ id: doc.ref?.id, publishedAt: doc.data?.publishedAt, title: doc.data?.title }) ));
                         }
                         if (originalQuery._delegate._query.limit) {
-                            mergedDocs = _.take(mergedDocs, originalQuery._delegate._query.limit);
+                                mergedDocs = _.take(mergedDocs, originalQuery._delegate._query.limit);
+                            }
+
+                        const lastQueriedDocs: (DocumentSnapshot<firebase.firestore.DocumentData> | null)[] = [];
+                        serializedDocumentArrays.forEach((array, arrayIndex) => {
+                            let lastQueriedDoc:  SerializedDocument<SerializedInterface<any>> | null = null;
+
+                            // Iterate through the documents in the array to find the last one that was used
+                            for (let i = array.length - 1; i >= 0; i--) {
+                                const doc = array[i];
+                                // Check if the document exists in the mergedDocs
+                                if (mergedDocs.find(mergedDoc => mergedDoc.ref.id === doc.ref.id)) {
+                                    lastQueriedDoc = doc;
+                                    break; // Stop iterating once the last used document is found
+                                }
+                            }
+                            lastQueriedDocs[arrayIndex] = lastQueriedDoc ? lastQueriedDoc.snapshot : null;
+                        });
+                        const previousSplittedQueryIndex = splittedQueriesQueue.findIndex((queueItem) => {
+                            return !!(queueItem.query?.path?.segments?.join('.') === originalQuery._delegate._query.path.segments.join('.') &&
+                                queueItem.query?.filters?.every((filter: any) => originalQuery._delegate._query.filters?.some((originalFilter) => _.isEqual(filter, originalFilter)))
+                                &&
+                                queueItem.lastQueriedDocs?.some((doc) => doc.id === originalQuery._delegate._query.startAt?.position[1].referenceValue.split('/').pop()));
+
+                        });
+                        if (previousSplittedQueryIndex !== -1) {
+                            splittedQueriesQueue.splice(previousSplittedQueryIndex, 1);
                         }
+                        splittedQueriesQueue.push({ query: originalQuery._delegate._query, lastQueriedDocs });
+                        if (splittedQueriesQueue.length > MAX_QUEUE_SIZE) {
+                                splittedQueriesQueue.shift();
+                        }
+                        // console.log('splittedQueriesQueue', splittedQueriesQueue);
+                        // console.log('all mergedDocs', mergedDocs.length, mergedDocs.map((doc) => ({ id: doc.ref?.id, title: doc.data?.title, publishedAt: doc.data?.publishedAt }) ));
 
-                        const mergedQuerySnapshot = {docs: mergedDocs} as QuerySnapshot;
+                        resolve({ready: () => Promise.resolve(mergedDocs)} as SerializedDocumentArray<any>);
 
-                            resolve(new SerializedDocumentArray(mergedQuerySnapshot, includesConfig));
                     }).catch(reject);
                 });
             } else {
@@ -425,10 +491,10 @@ const deserializeValue = (value: any) => {
     }
 };
 
- function constructNewQueryFromQuery(originalQuery: Query & QueryHiddenProps, firestore: Firestore): Query {
+ function constructNewQueryFromQuery(originalQuery: Query & QueryHiddenProps, firestore: Firestore, index: number = 0): Query {
     const originalQueryProps = (originalQuery as QueryHiddenProps)._delegate._query;
     // Initialize new query with the same collection reference
-    let newQuery: firebase.firestore.Query = firestore.collection(originalQueryProps.path.segments.join('/'));
+    let newQuery: firebase.firestore.Query  = firestore.collection(originalQueryProps.path.segments.join('/'));
     // Apply properties from the original query to the new query
     if (originalQueryProps.filters) {
         originalQueryProps.filters.forEach(filter => {
@@ -446,6 +512,19 @@ const deserializeValue = (value: any) => {
 
     if (originalQueryProps.startAt?.position?.length > 0) {
         (newQuery as Query & QueryHiddenProps)._delegate._query.startAt = _.cloneDeep(originalQueryProps.startAt);
+        const previousQuery = splittedQueriesQueue.find((queueItem) => {
+            return !!(queueItem.query?.path?.segments?.join('.') === originalQueryProps.path.segments.join('.') &&
+                queueItem.lastQueriedDocs?.some((doc) => doc.id === originalQueryProps.startAt.position[1].referenceValue.split('/').pop()) &&
+                queueItem.query?.filters?.every((filter: any) => originalQueryProps.filters?.some((originalFilter) => _.isEqual(filter, originalFilter))));
+
+        });
+        if (previousQuery) {
+            console.log('Found previous query', previousQuery);
+            const newLastQueriedDoc = previousQuery.lastQueriedDocs[index];
+            if (newLastQueriedDoc) {
+                newQuery = (newQuery as Query & QueryHiddenProps)._delegate._query.startAt.position[1] = newLastQueriedDoc;
+            }
+        }
     }
     if (originalQueryProps.endAt) {
         (newQuery as Query & QueryHiddenProps)._delegate._query.endAt = _.cloneDeep(originalQueryProps.endAt);
