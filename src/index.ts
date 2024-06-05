@@ -173,13 +173,16 @@ export class SerializedDocument<T extends SerializedInterface<T>> {
                     })
             }
 
-            //Is function relation, the function will return a reference to be included.
+            //Is function relation, the function will return a reference or reference Array to be included.
             if (typeof includeValue === 'function') {
                 const returnedValue = includeValue(this);
                 if (isCollectionReferenceOrQuery(returnedValue)) {
                     return this.includeCollectionReferenceOrQuery(path, returnedValue)
                 } else if (isDocumentReference(returnedValue)) {
                     return this.includeDocumentReference(path, returnedValue)
+                } else if (Array.isArray(returnedValue)) {
+                    //Is nested array relation SerializedDocument[]
+                    return this.includeReferenceArray(path, returnedValue, includeValue)
                 }
 
             }
