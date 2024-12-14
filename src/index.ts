@@ -1,7 +1,7 @@
 import 'core-js/features/promise'
 import { DocumentReference, CollectionReference, DocumentSnapshot, getDoc, getDocs, Query, QuerySnapshot, doc, collection } from 'firebase/firestore';
 import 'core-js/features/promise';
-import _ from "lodash-es";
+import _ from "lodash";
 import 'firebase/compat/firestore';
 import {Firestore} from '@firebase/firestore';
 

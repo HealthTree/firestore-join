@@ -47,9 +47,6 @@
       "limit": "10 KB"
     }
   ],
-  "peerDependencies": {
-    "firebase": "^9.1.0"
-  },
   "devDependencies": {
     "@size-limit/preset-small-lib": "^4.10.1",
     "@types/core-js": "^2.5.8",
@@ -64,6 +61,7 @@
   "dependencies": {
     "@types/lodash-es": "^4.17.12",
     "core-js": "^3.6.5",
+    "lodash": "^4.17.21",
     "lodash-es": "^4.17.21"
   },
   "description": "Join firestore references automatically.",
