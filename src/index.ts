@@ -1,10 +1,9 @@
 import 'core-js/features/promise'
-import { DocumentReference, CollectionReference, DocumentSnapshot, getDoc, getDocs, Query, QuerySnapshot } from 'firebase/firestore';
-import _ from "lodash";
+import { DocumentReference, CollectionReference, DocumentSnapshot, getDoc, getDocs, Query, QuerySnapshot, doc, collection } from 'firebase/firestore';
 import 'core-js/features/promise';
-import _ from 'lodash';
-import firebase from 'firebase/compat/app';
+import _ from "lodash-es";
 import 'firebase/compat/firestore';
+import {Firestore} from '@firebase/firestore';
 
 
 let cacheTimeout: number = 3000;
@@ -229,7 +228,7 @@ export class SerializedDocument<T extends SerializedInterface<T>> {
         const promise = new Promise(async (resolve, reject) => {
             SerializedDocumentArray.fromQuery(collectionReferenceOrQuery, includeConfig).then(serializedDocumentArray => {
                 _.set(this.included as object, path, serializedDocumentArray);
-                this._includedArray.push(...serializedDocumentArray);
+                this._includedArray.push(...serializedDocumentArray as any);
                 resolve(serializedDocumentArray)
             }).catch(reject)
         });
@@ -335,7 +334,7 @@ export function getCachedDocumentSnapshotPromise(documentReference: DocumentRefe
     }
 }
 
-function convertRefToJoinRef(ref: firebase.firestore.DocumentReference) {
+function convertRefToJoinRef(ref: DocumentReference) {
     return {
         _type: 'DocumentReference',
         path: ref.path
@@ -389,9 +388,9 @@ function preprocessObjectToStringify(key: any, value: any) {
 function convertJoinRefToRef(JoinRef: JoinRef, firestore: Firestore) {
     const isDoc = JoinRef.path.split('/').length % 2 === 0;
     if(isDoc) {
-        return firestore.doc(JoinRef.path);
+        return doc(firestore, JoinRef.path)
     }
-    return firestore.collection(JoinRef.path);
+    return collection(firestore, JoinRef.path);
 }
 
 function convertJoinDateToJSDate(joinDate: JoinDate) {
