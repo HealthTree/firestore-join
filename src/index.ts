@@ -1,18 +1,31 @@
 import 'core-js/features/promise'
-import { DocumentReference, CollectionReference, DocumentSnapshot, getDoc, getDocs, Query, QuerySnapshot, doc, collection } from 'firebase/firestore';
+import { DocumentReference, CollectionReference,DocumentSnapshot, getDoc, getDocs, Query, QuerySnapshot, doc, collection } from 'firebase/firestore';
 import 'core-js/features/promise';
 import _ from "lodash";
 import 'firebase/compat/firestore';
 import {Firestore} from '@firebase/firestore';
-
+import {firestore as firebaseAdminFirestore} from 'firebase-admin';
+import AdminDocumentReference = firebaseAdminFirestore.DocumentReference;
+import AdminDocumentSnapshot = firebaseAdminFirestore.DocumentSnapshot;
+import AdminFirestore = firebaseAdminFirestore.Firestore;
 
 let cacheTimeout: number = 3000;
+/*
+ Firebase Modular uses getDocs, getDoc, etc
+ Firebase-Admin is not yet modular in its implementation (still works as V9 with the ref.get()
+
+ https://stackoverflow.com/questions/75172000/modular-firebase-admin-database
+* */
+let firebaseType: 'modular' | 'compat' | 'admin' = 'modular';
 
 let documentReferencePromiseMapCache: { [key: string]: CachedDocumentSnapshotPromise } = {};
 
 let serializedDocumentTransformer: Function = transformDates;
 
-export interface CachedDocumentSnapshotPromise extends Promise<DocumentSnapshot> {
+function isModular() {
+    return firebaseType === 'modular';
+}
+export interface CachedDocumentSnapshotPromise extends Promise<DocumentSnapshot | AdminDocumentSnapshot> {
     time: number
 }
 
@@ -67,7 +80,7 @@ export class SerializedDocumentArray<T extends SerializedInterface<T>> extends A
         super(...docs)
     }
 
-    static fromDocumentReferenceArray =<T extends SerializedInterface<T>> (documentReferenceArray: [DocumentReference], includesConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentArrayPromise<T> => {
+    static fromDocumentReferenceArray =<T extends SerializedInterface<T>> (documentReferenceArray: [DocumentReference | AdminDocumentReference], includesConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentArrayPromise<T> => {
         return new SerializedDocumentArrayPromise(async (resolve: any, reject: any) => {
             Promise.all(documentReferenceArray.map(documentReference => SerializedDocument.fromDocumentReference(documentReference, includesConfig))).then(serializedDocuments => {
                 resolve(Object.setPrototypeOf(serializedDocuments, SerializedDocumentArray.prototype))
@@ -106,22 +119,26 @@ interface SerializedInterface<T> extends Partial<SerializedDocument<T>> {}
 
 export class SerializedDocument<T extends SerializedInterface<T>> {
     data: T['data']
-    ref: DocumentReference
+    ref: DocumentReference | AdminDocumentReference
+    modularRef: DocumentReference
+    compactRef: AdminDocumentReference
     included: T['included'] = {}
     promises: Object = {}
     _promisesArray: Promise<any>[] = []
     _includedArray: SerializedDocument<T>[] = []
-    snapshot: DocumentSnapshot
+    snapshot: DocumentSnapshot | AdminDocumentSnapshot
 
-    constructor(documentSnapshot: DocumentSnapshot, includeConfig: IncludeConfig | 'ALL' = {}) {
+    constructor(documentSnapshot: DocumentSnapshot | AdminDocumentSnapshot, includeConfig: IncludeConfig | 'ALL' = {}) {
         this.data = documentSnapshot.data();
         this.snapshot = documentSnapshot;
+        this.modularRef = documentSnapshot.ref as DocumentReference;
+        this.compactRef = documentSnapshot.ref as AdminDocumentReference
         this.ref = documentSnapshot.ref;
         this.processIncludes(includeConfig);
         this.data = serializedDocumentTransformer(this).data;
     }
 
-    static createLocal = <T extends SerializedInterface<T>>(ref: DocumentReference, data: any = {}, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocument<T> => {
+    static createLocal = <T extends SerializedInterface<T>>(ref: DocumentReference | AdminDocumentReference, data: any = {}, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocument<T> => {
         const serializedDocument = new SerializedDocument({ref, data: () => data} as DocumentSnapshot, includeConfig) as SerializedDocument<T>;
         serializedDocument.data = data;
         serializedDocument.ref = ref;
@@ -129,7 +146,7 @@ export class SerializedDocument<T extends SerializedInterface<T>> {
         return serializedDocument;
     }
 
-    static fromDocumentReference = <T extends SerializedInterface<T>>(ref: DocumentReference, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentPromise<T> => {
+    static fromDocumentReference = <T extends SerializedInterface<T>>(ref: DocumentReference | AdminDocumentReference, includeConfig: IncludeConfig | 'ALL' = {}): SerializedDocumentPromise<T> => {
         return new SerializedDocumentPromise((resolve: any, reject: any) => {
             getCachedDocumentSnapshotPromise(ref)
                 .then(documentSnapshot => resolve(new SerializedDocument(documentSnapshot, includeConfig)))
@@ -194,10 +211,10 @@ export class SerializedDocument<T extends SerializedInterface<T>> {
         })
     }
 
-    includeReferenceArray = (path: string, documentReferenceArray: DocumentReference[], includeConfig = {}) => {
+    includeReferenceArray = (path: string, documentReferenceArray: DocumentReference[] | AdminDocumentReference[], includeConfig = {}) => {
         _.set(this.included as object, path, [])
         _.set(this.promises, path, [])
-        documentReferenceArray.forEach((documentReference: DocumentReference) => {
+        documentReferenceArray.forEach((documentReference: DocumentReference | AdminDocumentReference) => {
             const promise = new Promise((resolve, reject) => {
                 getCachedDocumentSnapshotPromise(documentReference).then(documentSnapshot => {
                     const includedSerializedDocument = serializedDocumentTransformer(new SerializedDocument(documentSnapshot, includeConfig))
@@ -211,7 +228,7 @@ export class SerializedDocument<T extends SerializedInterface<T>> {
         })
     }
 
-    includeDocumentReference = (path: string, documentReference: DocumentReference, includeConfig = {}) => {
+    includeDocumentReference = (path: string, documentReference: DocumentReference | AdminDocumentReference, includeConfig = {}) => {
         const promise = new Promise((resolve, reject) => {
             getCachedDocumentSnapshotPromise(documentReference).then(documentSnapshot => {
                 const includedSerializedDocument = serializedDocumentTransformer(new SerializedDocument(documentSnapshot, includeConfig))
@@ -319,22 +336,29 @@ function isCollectionReferenceOrQuery(value: any) {
 export function setCacheTimeout(milliseconds: number) {
     cacheTimeout = milliseconds;
 }
-
+export function setFirebaseType(type: 'modular' | 'compat' | 'admin') {
+    firebaseType = type;
+}
 export function setSerializedDocumentTransformer(transformerFunction: Function) {
     serializedDocumentTransformer = transformerFunction;
 }
 
-export function getCachedDocumentSnapshotPromise(documentReference: DocumentReference): CachedDocumentSnapshotPromise {
+export function getCachedDocumentSnapshotPromise(documentReference: DocumentReference | AdminDocumentReference): CachedDocumentSnapshotPromise {
     if (documentReferencePromiseMapCache[documentReference.path]?.time + cacheTimeout > Date.now()) {
         return documentReferencePromiseMapCache[documentReference.path];
     } else {
-        const documentSnapshotPromise = (getDoc(documentReference)) as CachedDocumentSnapshotPromise;
+        let documentSnapshotPromise;
+        if(isModular()) {
+            documentSnapshotPromise = (getDoc(documentReference as DocumentReference)) as CachedDocumentSnapshotPromise;
+        } else  {
+            documentSnapshotPromise = ((documentReference as AdminDocumentReference).get()) as CachedDocumentSnapshotPromise;
+        }
         documentSnapshotPromise.time = Date.now();
         return documentReferencePromiseMapCache[documentReference.path] = documentSnapshotPromise;
     }
 }
 
-function convertRefToJoinRef(ref: DocumentReference) {
+function convertRefToJoinRef(ref: DocumentReference | AdminDocumentReference) {
     return {
         _type: 'DocumentReference',
         path: ref.path
@@ -385,12 +409,20 @@ function preprocessObjectToStringify(key: any, value: any) {
     return returnVal;
 }
 
-function convertJoinRefToRef(JoinRef: JoinRef, firestore: Firestore) {
+function convertJoinRefToRef(JoinRef: JoinRef, firestore: Firestore | AdminFirestore) {
     const isDoc = JoinRef.path.split('/').length % 2 === 0;
     if(isDoc) {
-        return doc(firestore, JoinRef.path)
+        if(isModular()) {
+            return doc(firestore as Firestore, JoinRef.path)
+        } else {
+            return (firestore as AdminFirestore).doc(JoinRef.path);
+        }
     }
-    return collection(firestore, JoinRef.path);
+    if(isModular()) {
+        return collection(firestore as Firestore, JoinRef.path);
+    } else {
+        return (firestore as AdminFirestore).collection(JoinRef.path);
+    }
 }
 
 function convertJoinDateToJSDate(joinDate: JoinDate) {
@@ -425,7 +457,7 @@ function isJoinDate(obj: any) {
     return false;
 }
 
-export function processParsedJoinJSON(data: any, firestore: Firestore) {
+export function processParsedJoinJSON(data: any, firestore: Firestore | AdminFirestore) {
     if (data) {
         if(isJoinRef(data)) {
             return convertJoinRefToRef(data, firestore)
@@ -440,7 +472,7 @@ export function processParsedJoinJSON(data: any, firestore: Firestore) {
     return data;
 }
 
-export function fromJSON(data: string, firestore: Firestore) {
+export function fromJSON(data: string, firestore: Firestore | AdminFirestore) {
     const obj = JSON.parse(data);
     return processParsedJoinJSON(obj, firestore);
 }
