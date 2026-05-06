@@ -11,8 +11,46 @@ import Firestore = firebase.firestore.Firestore;
 
 
 let cacheTimeout: number = 3000;
+const CACHE_CLEANUP_INTERVAL_MS = 60_000;
 
 let documentReferencePromiseMapCache: { [key: string]: CachedDocumentSnapshotPromise } = {};
+
+// --- Cache cleanup ---
+
+function sweepExpiredCacheEntries(): void {
+    const now = Date.now();
+    for (const path of Object.keys(documentReferencePromiseMapCache)) {
+        const entry = documentReferencePromiseMapCache[path];
+        if (entry?.time + cacheTimeout <= now) {
+            delete documentReferencePromiseMapCache[path];
+        }
+    }
+}
+
+let cacheCleanupInterval: ReturnType<typeof setInterval> | null = null;
+
+export function startCacheCleanup(intervalMs: number = CACHE_CLEANUP_INTERVAL_MS): void {
+    stopCacheCleanup();
+    cacheCleanupInterval = setInterval(sweepExpiredCacheEntries, intervalMs);
+    // Allow the Node.js process to exit even if the interval is still active
+    if (typeof cacheCleanupInterval === 'object' && 'unref' in cacheCleanupInterval) {
+        cacheCleanupInterval.unref();
+    }
+}
+
+export function stopCacheCleanup(): void {
+    if (cacheCleanupInterval !== null) {
+        clearInterval(cacheCleanupInterval);
+        cacheCleanupInterval = null;
+    }
+}
+
+export function clearCache(): void {
+    documentReferencePromiseMapCache = {};
+}
+
+// Auto-start cleanup on module load
+startCacheCleanup();
 
 let serializedDocumentTransformer: Function = transformDates;
 
